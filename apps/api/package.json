@@ -1,0 +1,40 @@
+{
+  "name": "@miraaj/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "pnpm --filter @miraaj/shared-types --filter @miraaj/shared-config --filter @miraaj/shared-validation --filter @miraaj/shared-logging build",
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "pretest": "pnpm --filter @miraaj/shared-types --filter @miraaj/shared-config --filter @miraaj/shared-validation --filter @miraaj/shared-logging build",
+    "test": "vitest run src --passWithNoTests"
+  },
+  "dependencies": {
+    "@miraaj/shared-config": "workspace:*",
+    "@miraaj/shared-logging": "workspace:*",
+    "@miraaj/shared-types": "workspace:*",
+    "@miraaj/shared-validation": "workspace:*",
+    "@nestjs/common": "^11.1.11",
+    "@nestjs/core": "^11.1.11",
+    "@nestjs/platform-express": "^11.1.11",
+    "helmet": "^8.1.0",
+    "ioredis": "^5.8.2",
+    "mongoose": "^9.1.5",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@miraaj/eslint-config": "workspace:*",
+    "@miraaj/tsconfig": "workspace:*",
+    "@types/node": "^24.10.1",
+    "eslint": "^9.39.5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.64.0",
+    "vitest": "^4.0.18"
+  }
+}

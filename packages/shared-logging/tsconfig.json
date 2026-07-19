@@ -1,0 +1,4 @@
+{
+  "extends": "@miraaj/tsconfig/base.json",
+  "include": ["src/**/*.ts"]
+}

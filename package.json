@@ -1,0 +1,30 @@
+{
+  "name": "miraaj-tech-ai-system",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm dev:web",
+    "dev:infra": "docker compose up -d mongo redis minio minio-init",
+    "dev:web": "pnpm --filter @miraaj/web dev",
+    "dev:api": "pnpm --filter @miraaj/api dev",
+    "dev:ai": "pnpm --filter @miraaj/ai-service dev",
+    "dev:all": "pnpm -r --parallel --filter @miraaj/web --filter @miraaj/api --filter @miraaj/ai-service dev",
+    "build": "env -u NODE_ENV pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "ai:install": "python3 -m venv apps/ai-service/.venv && apps/ai-service/.venv/bin/pip install --upgrade pip && apps/ai-service/.venv/bin/pip install -r apps/ai-service/requirements.lock.txt",
+    "ai:test": "pnpm --filter @miraaj/ai-service test",
+    "ai:format": "apps/ai-service/.venv/bin/ruff format apps/ai-service && apps/ai-service/.venv/bin/ruff check --fix apps/ai-service",
+    "ai:health": "curl --fail --silent http://127.0.0.1:8200/health && printf '\\n' && curl --fail --silent http://127.0.0.1:8200/ready && printf '\\n' && curl --fail --silent http://127.0.0.1:8200/version && printf '\\n'"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "eslint": "^9.39.5",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.64.0"
+  }
+}

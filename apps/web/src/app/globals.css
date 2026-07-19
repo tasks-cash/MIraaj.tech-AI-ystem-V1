@@ -1,0 +1,130 @@
+@import "tailwindcss";
+
+:root {
+  --navy: #071a33;
+  --blue: #176bff;
+  --blue-dark: #0e55d7;
+  --bright-blue: #36a3ff;
+  --cyan: #ddf4ff;
+  --soft: #f6f8fc;
+  --text: #0b1628;
+  --muted: #5e6b7e;
+  --border: #e4e9f1;
+  --success: #14a56b;
+  --background: #ffffff;
+  --foreground: var(--text);
+  --radius-sm: 0.75rem;
+  --radius-md: 1.125rem;
+  --radius-lg: 1.5rem;
+  --shadow-card: 0 1px 2px rgba(7, 26, 51, 0.03), 0 12px 36px rgba(7, 26, 51, 0.05);
+  --shadow-button: 0 10px 24px rgba(23, 107, 255, 0.2);
+  --section-space: clamp(4.5rem, 8vw, 7.5rem);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  overflow-x: clip;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-inter), Arial, sans-serif;
+  text-rendering: optimizeLegibility;
+  overflow-wrap: anywhere;
+}
+
+html[dir="rtl"] body {
+  font-family: var(--font-arabic), var(--font-inter), Arial, sans-serif;
+}
+
+button,
+a,
+input,
+textarea,
+select,
+summary {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+summary,
+select {
+  cursor: pointer;
+}
+
+::selection {
+  background: #bfdbfe;
+  color: var(--navy);
+}
+
+.section-space {
+  padding-block: var(--section-space);
+}
+
+.skip-link {
+  position: fixed;
+  inset-inline-start: 1rem;
+  top: 1rem;
+  z-index: 200;
+  transform: translateY(-150%);
+  border-radius: 999px;
+  background: var(--navy);
+  padding: 0.75rem 1rem;
+  color: white;
+  font-weight: 700;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.prose-copy {
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.9;
+}
+
+.prose-copy h2 {
+  margin-block: 2.5rem 0.75rem;
+  color: var(--navy);
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.mock-float {
+  animation: float 5s ease-in-out infinite;
+}
+
+.mock-float-slow {
+  animation: float 6.5s ease-in-out -1.5s infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

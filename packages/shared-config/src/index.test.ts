@@ -1,0 +1,46 @@
+import { describe, expect, it } from "vitest";
+import { apiEnvironmentSchema } from "./index.js";
+
+const baseEnvironment = {
+  APP_ENV: "development",
+  MONGODB_URI: "mongodb://localhost:27020/miraaj",
+  REDIS_URL: "redis://localhost:6383",
+  S3_ENDPOINT: "http://localhost:9200",
+  S3_BUCKET: "miraaj-media",
+  S3_ACCESS_KEY_ID: "test-access-key",
+  S3_SECRET_ACCESS_KEY: "test-secret-key",
+  ENCRYPTION_KEY_ID: "test-v1",
+  ENCRYPTION_MASTER_KEY: "test-encryption-key-with-at-least-32-characters",
+  AI_SERVICE_URL: "http://localhost:8200",
+  AI_SERVICE_INTERNAL_SECRET: "test-internal-secret-with-at-least-32-characters",
+  ADMIN_API_TOKEN: "test-admin-token-with-at-least-32-characters",
+} as const;
+
+describe("API environment policy", () => {
+  it("allows temporary admin authentication outside production", () => {
+    expect(apiEnvironmentSchema.safeParse(baseEnvironment).success).toBe(true);
+  });
+
+  it("rejects temporary admin authentication in production by default", () => {
+    const result = apiEnvironmentSchema.safeParse({
+      ...baseEnvironment,
+      APP_ENV: "production",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual([
+        "TEMPORARY_ADMIN_TOKEN_ENABLED",
+      ]);
+    }
+  });
+
+  it("requires an explicit production override for temporary admin authentication", () => {
+    expect(
+      apiEnvironmentSchema.safeParse({
+        ...baseEnvironment,
+        APP_ENV: "production",
+        ALLOW_TEMPORARY_ADMIN_TOKEN_IN_PRODUCTION: "true",
+      }).success,
+    ).toBe(true);
+  });
+});

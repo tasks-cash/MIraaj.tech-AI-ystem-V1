@@ -1,0 +1,32 @@
+{
+  "name": "maraaj-intelligence-core",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "dev:infra": "docker compose up -d mongo redis minio minio-init",
+    "dev:api": "pnpm --filter @maraaj/api dev",
+    "dev:admin": "pnpm --filter @maraaj/admin dev",
+    "dev:web": "pnpm --filter @maraaj/web dev",
+    "dev:worker": "pnpm --filter @maraaj/worker dev",
+    "dev:ai": "pnpm --filter @maraaj/ai-service dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:security": "pnpm --filter @maraaj/api test:security",
+    "seed": "pnpm --filter @maraaj/api seed",
+    "admin:create": "pnpm --filter @maraaj/api admin:create",
+    "admin:reset-password": "pnpm --filter @maraaj/api exec tsx src/cli/admin-create.ts --reset-password",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.32",
+    "turbo": "^2.5.4",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

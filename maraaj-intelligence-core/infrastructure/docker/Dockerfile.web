@@ -1,0 +1,15 @@
+
+FROM node:22-alpine AS base
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
+WORKDIR /app
+ARG APP=web
+ARG PORT=3000
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* turbo.json tsconfig.base.json ./
+COPY packages ./packages
+COPY apps/${APP} ./apps/${APP}
+RUN pnpm install --filter @maraaj/${APP}... --frozen-lockfile=false
+RUN pnpm --filter @maraaj/${APP} build
+WORKDIR /app/apps/${APP}
+ENV PORT=${PORT}
+EXPOSE ${PORT}
+CMD ["pnpm", "start"]

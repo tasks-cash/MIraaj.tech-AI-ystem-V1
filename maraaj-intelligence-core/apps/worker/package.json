@@ -1,0 +1,32 @@
+{
+  "name": "@maraaj/worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo ok",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@maraaj/cache": "workspace:*",
+    "@maraaj/config": "workspace:*",
+    "@maraaj/crypto": "workspace:*",
+    "@maraaj/database": "workspace:*",
+    "@maraaj/logging": "workspace:*",
+    "@maraaj/queue": "workspace:*",
+    "@maraaj/social-card": "workspace:*",
+    "@maraaj/storage": "workspace:*",
+    "bullmq": "^5.56.0",
+    "ioredis": "^5.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.32",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

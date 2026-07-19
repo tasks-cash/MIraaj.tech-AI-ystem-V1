@@ -1,0 +1,23 @@
+
+@import "tailwindcss";
+
+:root {
+  --bg0: #0c1220;
+  --bg1: #152238;
+  --accent: #c9a227;
+  --text: #f4f1ea;
+  --muted: #b8c0d0;
+}
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #1e3a5f 0%, transparent 55%),
+    radial-gradient(900px 500px at 90% 0%, #3a2a12 0%, transparent 50%),
+    linear-gradient(180deg, var(--bg0), var(--bg1));
+  color: var(--text);
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+
+a { color: inherit; }

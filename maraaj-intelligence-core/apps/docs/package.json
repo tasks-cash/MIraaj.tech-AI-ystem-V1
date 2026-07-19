@@ -1,0 +1,12 @@
+{
+  "name": "@maraaj/docs",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'Docs are markdown under /docs; serve via README'",
+    "build": "echo ok",
+    "typecheck": "echo ok",
+    "lint": "echo ok",
+    "test": "echo ok"
+  }
+}

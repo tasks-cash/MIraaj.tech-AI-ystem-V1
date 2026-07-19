@@ -1,0 +1,151 @@
+
+services:
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    ports:
+      - "27019:27017"
+    volumes:
+      - mic_mongo:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6381:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - mic_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: maraaj
+      MINIO_ROOT_PASSWORD: maraajsecret
+    ports:
+      - "9100:9000"
+      - "9101:9001"
+    volumes:
+      - mic_minio:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 3;
+      mc alias set local http://minio:9000 maraaj maraajsecret;
+      mc mb -p local/maraaj || true;
+      exit 0;
+      "
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.api
+    env_file: .env
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/maraaj_mic
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: maraaj
+      S3_SECRET_KEY: maraajsecret
+      AI_SERVICE_URL: http://ai-service:8000
+      API_PORT: "4000"
+    ports:
+      - "4100:4000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+  worker:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.worker
+    env_file: .env
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/maraaj_mic
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: maraaj
+      S3_SECRET_KEY: maraajsecret
+      AI_SERVICE_URL: http://ai-service:8000
+    depends_on:
+      - api
+      - ai-service
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.ai
+    ports:
+      - "8100:8000"
+    environment:
+      LOG_LEVEL: info
+
+  admin:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.web
+      args:
+        APP: admin
+        PORT: "3001"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+    ports:
+      - "3101:3001"
+    depends_on:
+      - api
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.web
+      args:
+        APP: web
+        PORT: "3000"
+    environment:
+      API_URL: http://api:4000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+    ports:
+      - "3100:3000"
+    depends_on:
+      - api
+
+  clamav:
+    image: clamav/clamav:1.4
+    profiles: ["full"]
+    ports:
+      - "3310:3310"
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    profiles: ["full"]
+    volumes:
+      - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+volumes:
+  mic_mongo:
+  mic_redis:
+  mic_minio:

@@ -1,0 +1,13 @@
+{
+  "name": "@miraaj/ai-service",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": ".venv/bin/uvicorn app.main:app --host \"${AI_SERVICE_HOST:-127.0.0.1}\" --port \"${AI_SERVICE_PORT:-8200}\" --reload",
+    "build": ".venv/bin/python -m compileall -q app",
+    "start": ".venv/bin/uvicorn app.main:app --host \"${AI_SERVICE_HOST:-127.0.0.1}\" --port \"${AI_SERVICE_PORT:-8200}\"",
+    "typecheck": ".venv/bin/mypy app",
+    "lint": ".venv/bin/ruff check app tests && .venv/bin/ruff format --check app tests",
+    "test": ".venv/bin/pytest tests"
+  }
+}

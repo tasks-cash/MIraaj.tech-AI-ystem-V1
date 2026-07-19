@@ -1,0 +1,22 @@
+import os
+
+TEST_ENVIRONMENT = {
+    "APP_ENV": "test",
+    "AI_SERVICE_HOST": "127.0.0.1",
+    "AI_SERVICE_PORT": "8200",
+    "AI_SERVICE_ID": "miraaj-api",
+    "AI_SERVICE_VERSION": "0.1.0",
+    "AI_SERVICE_ALLOWED_IDS": "miraaj-api",
+    "AI_SERVICE_INTERNAL_SECRET": "test-only-internal-secret-with-32-characters",
+    "AI_SERVICE_URL": "http://localhost:8200",
+    "AI_SERVICE_REQUEST_TIMEOUT_MS": "5000",
+    "AI_SERVICE_REPLAY_WINDOW_SECONDS": "120",
+    "AI_SERVICE_REDIS_REQUIRED": "false",
+    "AI_SERVICE_DEPENDENCY_TIMEOUT_MS": "100",
+    "LOG_LEVEL": "INFO",
+    "REDIS_URL": "",
+    "BUILD_ID": "test-build",
+}
+
+for key, value in TEST_ENVIRONMENT.items():
+    os.environ[key] = value
