@@ -133,3 +133,27 @@ temp/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and builds
+node_modules/
+.next/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Python
+.venv/
+apps/ai-service/.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Runtime
+*.log
+logs/
