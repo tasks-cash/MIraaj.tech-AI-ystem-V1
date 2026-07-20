@@ -35,9 +35,6 @@ export const REVIEW_STATUSES = [
 ] as const;
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
 
-export const SUPPORTED_LOCALES = ["ar", "en", "fr"] as const;
-export type Locale = (typeof SUPPORTED_LOCALES)[number];
-
 export type CountryCode = string & { readonly __brand: "CountryCode" };
 export type ConfidenceScore = number & { readonly __brand: "ConfidenceScore" };
 
@@ -108,3 +105,7 @@ export function asConfidenceScore(value: number): ConfidenceScore {
   }
   return value as ConfidenceScore;
 }
+
+export * from "./language-registry.js";
+export * from "./multilingual-contracts.js";
+export * from "./media-analysis.js";

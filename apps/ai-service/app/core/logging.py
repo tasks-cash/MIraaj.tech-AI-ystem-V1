@@ -14,6 +14,7 @@ SENSITIVE_KEYS = frozenset(
         "apikey",
         "aiserviceinternalsecret",
         "adminapitoken",
+        "geminiapikey",
         "mongodburi",
         "redisurl",
         "credentials",

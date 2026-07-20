@@ -15,6 +15,13 @@ import {
   AiServiceTimeoutError,
   AiServiceUnavailableError,
 } from "./types/ai-errors.js";
+import type {
+  AnalyzeResponse,
+  MediaInspectResponse,
+  OcrStatusResponse,
+  ProvidersStatusResponse,
+  SignedMediaRequestBody,
+} from "./types/ai-media-responses.js";
 
 @Injectable()
 export class AiInternalClientService {
@@ -22,53 +29,132 @@ export class AiInternalClientService {
     requestId?: string;
     correlationId?: string;
   }): Promise<ServiceHealth> {
-    return this.requestJson<ServiceHealth>("/health", input);
+    return this.requestJson<ServiceHealth>({ method: "GET", path: "/health", ...input });
   }
 
   async getReady(input?: {
     requestId?: string;
     correlationId?: string;
   }): Promise<ServiceReadiness> {
-    return this.requestJson<ServiceReadiness>("/ready", input);
+    return this.requestJson<ServiceReadiness>({ method: "GET", path: "/ready", ...input });
   }
 
   async getVersion(input?: {
     requestId?: string;
     correlationId?: string;
   }): Promise<ServiceVersion> {
-    return this.requestJson<ServiceVersion>("/version", input);
+    return this.requestJson<ServiceVersion>({ method: "GET", path: "/version", ...input });
   }
 
-  private async requestJson<T>(
-    path: string,
-    input?: { requestId?: string; correlationId?: string },
-  ): Promise<T> {
+  async postInspect(
+    body: SignedMediaRequestBody,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<MediaInspectResponse> {
+    return this.requestJson<MediaInspectResponse>({
+      method: "POST",
+      path: "/internal/v1/media/inspect",
+      body,
+      timeoutMs: loadEnvironment().MEDIA_PROCESSING_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `inspect-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async postOcr(
+    body: SignedMediaRequestBody,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ) {
+    return this.requestJson({
+      method: "POST",
+      path: "/internal/v1/media/ocr",
+      body,
+      timeoutMs: loadEnvironment().MEDIA_OCR_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `ocr-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async postAnalyze(
+    body: SignedMediaRequestBody,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<AnalyzeResponse> {
+    return this.requestJson<AnalyzeResponse>({
+      method: "POST",
+      path: "/internal/v1/media/analyze",
+      body,
+      timeoutMs: loadEnvironment().MEDIA_VISION_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `analyze-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async getOcrStatus(input?: {
+    requestId?: string;
+    correlationId?: string;
+  }): Promise<OcrStatusResponse> {
+    return this.requestJson<OcrStatusResponse>({
+      method: "GET",
+      path: "/internal/v1/ocr/status",
+      ...input,
+    });
+  }
+
+  async getProvidersStatus(input?: {
+    requestId?: string;
+    correlationId?: string;
+  }): Promise<ProvidersStatusResponse> {
+    return this.requestJson<ProvidersStatusResponse>({
+      method: "GET",
+      path: "/internal/v1/providers/status",
+      ...input,
+    });
+  }
+
+  private async requestJson<T>(input: {
+    method: "GET" | "POST";
+    path: string;
+    body?: unknown;
+    requestId?: string;
+    correlationId?: string;
+    idempotencyKey?: string;
+    timeoutMs?: number;
+  }): Promise<T> {
     const environment = loadEnvironment();
     const logger = createLogger({
       service: "miraaj-api",
       environment: environment.APP_ENV,
       level: environment.LOG_LEVEL,
     });
-    const requestId = input?.requestId ?? randomUUID();
-    const correlationId = input?.correlationId ?? requestId;
+    const requestId = input.requestId ?? randomUUID();
+    const correlationId = input.correlationId ?? requestId;
+    const bodyText =
+      input.method === "GET" ? "" : JSON.stringify(input.body ?? {});
+    const idempotencyKey =
+      input.idempotencyKey ??
+      (input.method === "GET" ? `get-${input.path}-${requestId}` : `post-${requestId}`);
     const metadata = signInternalRequest({
-      method: "GET",
-      path,
-      body: "",
-      idempotencyKey: `health-${path}-${requestId}`,
+      method: input.method,
+      path: input.path,
+      body: bodyText,
+      idempotencyKey,
       environment,
       requestId,
       correlationId,
     });
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      environment.AI_SERVICE_REQUEST_TIMEOUT_MS,
-    );
+    const timeoutMs = input.timeoutMs ?? environment.AI_SERVICE_REQUEST_TIMEOUT_MS;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const started = Date.now();
     try {
-      const response = await fetch(`${environment.AI_SERVICE_URL}${path}`, {
-        headers: internalRequestHeaders(metadata),
+      const response = await fetch(`${environment.AI_SERVICE_URL}${input.path}`, {
+        method: input.method,
+        headers: {
+          ...internalRequestHeaders(metadata),
+          ...(input.method === "POST"
+            ? { "Content-Type": "application/json" }
+            : {}),
+        },
+        ...(input.method === "POST" ? { body: bodyText } : {}),
         signal: controller.signal,
       });
       logger.info(
@@ -76,7 +162,7 @@ export class AiInternalClientService {
           requestId,
           correlationId,
           service: "miraaj-api",
-          route: path,
+          route: input.path,
           duration: Date.now() - started,
           status: response.status,
         },

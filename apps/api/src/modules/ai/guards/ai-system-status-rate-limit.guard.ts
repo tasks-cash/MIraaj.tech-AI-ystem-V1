@@ -5,7 +5,7 @@ import {
   HttpStatus,
   Injectable,
 } from "@nestjs/common";
-import type { TemporaryAdminRequest } from "./ai-system-status-permission.guard.js";
+import type { TemporaryAdminRequest } from "../types/admin-request.js";
 
 interface RateLimitEntry {
   count: number;

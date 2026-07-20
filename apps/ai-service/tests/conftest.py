@@ -16,6 +16,9 @@ TEST_ENVIRONMENT = {
     "LOG_LEVEL": "INFO",
     "REDIS_URL": "",
     "BUILD_ID": "test-build",
+    "MEDIA_FETCH_ALLOWED_HOSTS": "127.0.0.1,localhost,localhost:9200",
+    "VISION_PROVIDER_ENABLED": "false",
+    "GEMINI_API_KEY": "",
 }
 
 for key, value in TEST_ENVIRONMENT.items():

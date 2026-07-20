@@ -12,3 +12,11 @@ pytest
 pytest-asyncio
 ruff
 mypy
+pillow
+pypdf
+pymupdf
+opencv-python-headless
+pytesseract
+imagehash
+langdetect
+numpy

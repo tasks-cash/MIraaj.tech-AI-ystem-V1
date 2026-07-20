@@ -6,16 +6,7 @@ import {
 } from "@nestjs/common";
 import { AI_PERMISSIONS } from "@miraaj/shared-config";
 
-export interface TemporaryAdminRequest {
-  headers: {
-    authorization?: string;
-  };
-  adminPermissions?: readonly string[];
-  ip?: string;
-  socket?: {
-    remoteAddress?: string;
-  };
-}
+import type { TemporaryAdminRequest } from "../types/admin-request.js";
 
 @Injectable()
 export class AiSystemStatusPermissionGuard implements CanActivate {

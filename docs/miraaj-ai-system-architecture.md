@@ -37,7 +37,7 @@ It is not part of the root workspace and is not the source of truth.
 | `packages/ui` | Small UI helpers |
 | `packages/tsconfig` | Shared TS configs |
 | `packages/eslint-config` | Shared ESLint configs |
-| `packages/shared-types` | Prompt 1 AI foundation types |
+| `packages/shared-types` | Prompt 1 AI foundation types + global language registry |
 | `packages/shared-config` | Prompt 1 server/API env validation |
 | `packages/shared-validation` | Internal request canonicalization |
 | `packages/shared-logging` | Structured redacted logging |
@@ -351,6 +351,8 @@ pnpm build
 - `ADMIN_API_TOKEN` is temporary controlled-administration access; production
   requires an explicit override and migration to real RBAC
 - Host Tesseract/OpenCV/Gemini are intentionally not part of Prompt 1
+- Global multilingual registry types exist; runtime detection, OCR packs,
+  translation providers, glossaries, and campaign variants are not live yet
 
 ## 24. Exact prerequisites and requirements remaining for PROMPT 2
 
@@ -364,6 +366,275 @@ Foundation prerequisites:
 - Implement real administrator authentication/RBAC before exposing any public
   admin UI; preserve `ai.systemStatus.read` enforcement
 
-Prompt 2 may then add its explicitly approved analysis contracts and persistence.
+Prompt 2 multilingual foundations (required, not optional):
+
+- Consume the shared language registry in
+  `packages/shared-types/src/language-registry.ts`
+- Language detection, script detection, and RTL/LTR metadata
+- Configurable multilingual OCR language packs (do not run every pack per job)
+- Gemini multilingual structured analysis using BCP 47 codes
+- Source-language, locale, and country as separate fields
+- Confidence per language and human-review rules
+- Shared multilingual types for analysis persistence
+- Tests covering Tier 1 languages plus representative Tier 2 / mixed-script cases
+
+Prompt 2 must not permanently limit analysis models or database schemas to
+Arabic, English, and French only.
+
+Prompt 2 does **not** implement the complete campaign-translation /
+transcreation engine. That belongs to the Campaign Generation phase.
+
 OCR, provider integration, analysis jobs, workers, campaign features, referrals,
 commissions, and publishing are not implemented in this repository state.
+
+## 25. Global multilingual requirement
+
+Miraaj.tech AI System is a global multilingual platform. It must not be designed
+as an Arabic/English/French-only product. Country and language are always
+separate fields. Use ISO language codes and BCP 47 locale tags
+(examples: `ar`, `ar-DZ`, `en-US`, `fr-FR`, `pt-BR`, `zh-CN`, `zh-TW`).
+
+### 25.1 Language support tiers
+
+| Tier | Meaning | Examples |
+| --- | --- | --- |
+| 1 | Fully verified | Arabic, English, French, Spanish, German, Portuguese, Italian, Dutch, Turkish, Russian |
+| 2 | Extended global | Chinese Simplified/Traditional, Japanese, Korean, Hindi, Urdu, Persian, Hebrew, and other registered Tier 2 languages |
+| 3 | Provider-dependent | Any additional provider-supported language, marked with quality warnings and mandatory review for public campaigns |
+
+Do not claim equal quality across tiers.
+
+### 25.2 Language registry
+
+The single shared registry lives in
+`packages/shared-types/src/language-registry.ts`.
+
+Applications must not scatter independent language arrays. The registry defines
+capability flags, direction, script, OCR pack hints, fallback locales,
+confidence thresholds, and review requirements.
+
+Future admin permissions (declared, not yet enforced by identity RBAC):
+
+- `ai.languages.read` / `ai.languages.manage`
+- `ai.translation.read` / `generate` / `review` / `approve`
+- `ai.glossary.read` / `manage` / `publish`
+
+### 25.3 Scripts, RTL and LTR
+
+Supported writing systems include Latin, Arabic, Cyrillic, Greek, Hebrew,
+Devanagari, Bengali, Chinese, Japanese, Korean, and Thai.
+
+Direction:
+
+- RTL: Arabic, Urdu, Persian, Hebrew, and other registered RTL languages
+- LTR: all registered LTR languages
+- Mixed content: preserve bidirectional rendering; use `dir="rtl"|"ltr"|"auto"`
+  appropriately; isolate URLs, phones, prices, codes, hashtags, and usernames
+
+### 25.4 Language detection
+
+Future Language Detection Engine inputs: user selection, metadata, OCR text,
+captions, posts, documents, country hints, and campaign configuration.
+
+Outputs include primary language/locale, scored language list, script,
+direction, mixed-language flag, and review requirement. Do not infer language
+solely from IP or country. Administrators may correct detections; corrections
+become AI feedback.
+
+Selection priority:
+
+1. Administrator campaign configuration
+2. Explicit user selection
+3. Reliable content detection
+4. Source metadata
+5. Market default
+6. Safe fallback
+
+### 25.5 Multilingual OCR architecture
+
+Default Tesseract packs: `ara eng fra spa deu por ita nld tur rus`.
+
+Additional packs are optional and must be installed deliberately. Configure
+bundles such as:
+
+```text
+OCR_LANGUAGES_DEFAULT=ara+eng+fra
+OCR_LANGUAGES_INSTALLED=ara,eng,fra,spa,deu,por,ita,nld,tur,rus
+OCR_MAX_LANGUAGES_PER_JOB=4
+```
+
+OCR flow: detect scripts → apply country/user hints → select the smallest
+relevant language set → OCR → compare confidence → optional retry → store
+original and normalized text separately → return confidence → mark unsupported
+packs honestly. Never run dozens of OCR languages on every image.
+
+### 25.6 Translation architecture
+
+Translation is provider-neutral. Gemini must not be the only translation path.
+Future providers may include Gemini, OpenAI-compatible APIs, Google Cloud
+Translation, DeepL, Azure Translator, local models, and human workflows.
+
+Translation inputs include source/target language and locale, country, sector,
+platform, brand terminology, protected terms, tone, length, formality, glossary,
+and compliance rules. Outputs include translated text, detected source language,
+provider/model, confidence, warnings, protected-term report, review
+recommendation, timing, and cost.
+
+Brand and terminology glossaries must preserve Miraaj.tech, Tasks.cash, product
+names, domains, and approved professional terms. Sector glossaries (healthcare,
+legal, finance, etc.) prevent harmful literal translations.
+
+Shared contracts in
+`packages/shared-types/src/multilingual-contracts.ts` define:
+
+- `TranslationProvider` (provider-neutral interface)
+- `TranslationGlossary`
+- `CampaignLanguageVariant`
+- `SpeechToTextProvider` / `TextToSpeechProvider`
+- OCR bundle defaults and unsupported-language failure state
+
+Campaign language variants and market-specific transcreation belong to the
+Campaign Generation phase, not Prompt 2. Prompt 2 only ensures analysis and
+persistence schemas can carry multilingual fields.
+
+### 25.7 Locale and market adaptation
+
+Adapt tone, formality, CTA, date/time/number/currency formatting, units, phone
+and address order, legal disclaimers, and business terminology by locale and
+country together. Examples:
+
+- French in Algeria ≠ French in France
+- English in the UK ≠ English in the United States
+- Portuguese in Brazil ≠ Portuguese in Portugal
+- Arabic in Algeria ≠ Arabic in Saudi Arabia
+- Chinese Simplified ≠ Chinese Traditional
+
+### 25.8 Fallback and human review
+
+When a language is unavailable: do not silently switch languages; return an
+unsupported state; offer configured fallback; allow human translation; preserve
+original content; record the failure; never auto-publish.
+
+Require human review for Tier 3 languages, low confidence, ambiguous mixed
+language, regulated terminology, untested providers, unresolved glossary terms,
+suspicious script mixing, and significant source/target market mismatch.
+
+### 25.9 Future speech architecture
+
+Speech-to-text, text-to-speech, captions, dubbing, and voice-language detection
+are future phases. Shared types already reserve provider-neutral placeholders.
+Do not clone a real person’s voice without authorization. Do not implement
+expensive speech processing in Prompt 2 unless explicitly required.
+
+### 25.10 Current repository state
+
+Implemented now:
+
+- Central language registry covering all Tier 1 and Tier 2 language codes
+- BCP 47 helpers, RTL/LTR helpers, and selection-priority constants
+- `createdAt` / `updatedAt` on `LanguageDefinition`
+- Provider-neutral translation, glossary, campaign-variant, and speech contracts
+- OCR pack catalogs and reserved OCR bundle environment keys
+- Multilingual content field shapes for future analysis/persistence schemas
+- Future multilingual AI permissions in `@miraaj/shared-config`
+- Architecture documentation of the global requirement
+
+Not implemented yet (later prompts / live runtime outside shared contracts):
+
+- Live translation providers
+- Glossary persistence and admin UI
+- Campaign language variants / transcreation
+- Speech providers
+
+## 26. Prompt 2 — multilingual media ingestion and analysis
+
+Prompt 2 adds the production backend foundation for secure media upload,
+validation, OCR, vision analysis, confidence scoring, and human review.
+It does **not** add campaign generation, service matching, public upload UI,
+speech, or translation engines.
+
+### 26.1 Ownership boundaries
+
+| Owner | Responsibilities |
+| --- | --- |
+| NestJS `apps/api` | Upload sessions, MinIO coordination, Mongo models, BullMQ queues/workers, job orchestration, analysis/review persistence, admin read/write endpoints, audit events, permissions |
+| FastAPI `apps/ai-service` | Binary inspection, normalization support, OCR, script/language detection, vision adapters (Gemini first), internal HMAC processing endpoints |
+| MinIO | Private originals and normalized derivatives only |
+| MongoDB | Upload sessions, media assets, jobs, attempts, results, prompt versions, reviews, feedback |
+| Redis | BullMQ, short-lived idempotency, rate limits, worker coordination |
+
+FastAPI does **not** connect to MongoDB. Provider API keys exist only in the
+AI service runtime. NestJS never sends Mongo/S3 admin credentials to FastAPI.
+
+### 26.2 End-to-end pipeline
+
+Authenticated administrator → create upload session → presigned private upload →
+completion verifies object → validate binary (signature, decode, limits) →
+SHA-256 / duplicate detection → sanitize + normalize → store private objects →
+Mongo media record → analysis job → BullMQ worker → OCR language bundle → OCR →
+optional vision provider → schema validation → merge evidence → confidence →
+auto-complete or `awaiting_review` → immutable attempt + current result →
+protected admin read/review endpoints.
+
+### 26.3 Architectural decisions
+
+1. **Single private bucket with path prefixes** — retain `S3_BUCKET=miraaj-media`
+   with `media/original|normalized|ocr|previews/...` keys (non-guessable). Avoids
+   breaking existing MinIO init while keeping objects private.
+2. **Media transfer to FastAPI** — NestJS issues short-lived object-specific
+   signed GET URLs; FastAPI downloads with host allowlist, no redirects, size/
+   timeout bounds (SSRF-safe). No base64 JSON bodies for media bytes.
+3. **HMAC paths** — protect `/v1/*` and `/internal/v1/*` with the existing
+   canonical signature scheme (service ID, timestamp, request/correlation IDs,
+   idempotency for mutations, body SHA-256, replay cache).
+4. **Queues** — `miraaj.ai.media.validate`, `miraaj.ai.media.analyze`,
+   `miraaj.ai.media.dead-letter` with named jobs; atomic Mongo status transitions;
+   stale-job reconciliation against BullMQ ownership.
+5. **Temporary admin token** — until real RBAC, a valid temporary admin bearer
+   receives the full Prompt 2 AI permission set (still fail-closed in production
+   unless explicitly allowed).
+6. **Provider neutrality** — OCR and vision use Protocol/adapter interfaces;
+   Gemini is the first vision adapter; disabled provider supports OCR-only paths.
+7. **Prompt versioning** — active `media.business-context-analysis` prompt is
+   seeded in Mongo and referenced by ID/checksum on every result.
+8. **Malware scanning** — interface reserved, disabled, not claimed active.
+
+### 26.4 Supported media (Prompt 2)
+
+Enabled: JPEG, PNG, WebP, PDF (strict page/size limits). Rejected: executables,
+archives, SVG/HTML/JS, video/audio, animated GIF, encrypted/password PDFs,
+unknown binaries. Capabilities live in `MEDIA_CAPABILITY_REGISTRY`
+(`packages/shared-types`).
+
+### 26.5 Admin API surface (no public upload)
+
+- `POST/GET /api/admin/ai/media/upload-sessions...`
+- `GET /api/admin/ai/media/:mediaId`
+- `POST/GET /api/admin/ai/analysis/jobs...`
+- `GET /api/admin/ai/analysis/results/:resultId`
+- Review: `review` / `approve` / `reject`; job `retry` / `cancel`
+
+Permissions: `ai.media.*`, `ai.analysis.*`, `ai.prompts.*`, plus existing
+`ai.systemStatus.read` and language/translation permissions.
+
+### 26.6 Internal FastAPI surface
+
+- `POST /internal/v1/media/inspect`
+- `POST /internal/v1/media/ocr`
+- `POST /internal/v1/media/analyze`
+- `GET /internal/v1/providers/status`
+- `GET /internal/v1/ocr/status`
+
+### 26.7 Confidence and human review
+
+Deterministic Confidence Engine combines media validation, OCR, script/language,
+vision schema, business/audience, and content-purpose scores. Thresholds:
+`CONFIDENCE_AUTO_COMPLETE_MIN`, `CONFIDENCE_REVIEW_MIN`, `CONFIDENCE_LOW_BELOW`.
+Mandatory review for medical/legal/financial, missing OCR packs, Tier 3 /
+untested locales, audience/business ambiguity, provider conflicts, etc.
+
+### 26.8 Explicitly out of scope (Prompt 3+)
+
+Campaign generation, service matching, social publishing, Tasks.cash / referral /
+QR tracking, landing pages, speech/TTS/video/audio analysis, full translation
+engine, public AI chat, public upload UI, admin dashboards, billing.

@@ -36,6 +36,10 @@ export class InfrastructureService
     this.logger.info("MongoDB and Redis connections are ready");
   }
 
+  getRedis(): Redis {
+    return this.redis;
+  }
+
   async dependencyStatus(): Promise<DependencyStatus> {
     const mongo =
       mongoose.connection.readyState === mongoose.ConnectionStates.connected

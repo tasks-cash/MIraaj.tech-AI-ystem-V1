@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 from app.api.health import router as health_router
+from app.api.internal_media import router as internal_media_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.core.security import (
@@ -77,7 +78,7 @@ async def protect_internal_routes(
         request.headers.get("x-miraaj-correlation-id"),
         request_id,
     )
-    if request.url.path.startswith("/v1/"):
+    if request.url.path.startswith("/v1/") or request.url.path.startswith("/internal/v1/"):
         body = await request.body()
         try:
             if any(len(request.headers.getlist(name)) > 1 for name in SIGNED_HEADER_NAMES):
@@ -120,3 +121,4 @@ async def protect_internal_routes(
 
 
 app.include_router(health_router)
+app.include_router(internal_media_router)

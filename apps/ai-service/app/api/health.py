@@ -1,4 +1,5 @@
 import asyncio
+import importlib.util
 from time import perf_counter
 from typing import TypedDict
 
@@ -8,6 +9,7 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from app.core.config import get_settings
+from app.services.ocr.tesseract_provider import TesseractOCRProvider
 
 router = APIRouter(tags=["health"])
 
@@ -62,6 +64,70 @@ async def redis_readiness() -> DependencyResult:
         await client.aclose()
 
 
+def _module_available(module_name: str) -> bool:
+    return importlib.util.find_spec(module_name) is not None
+
+
+def media_dependency_readiness() -> dict[str, DependencyResult]:
+    settings = get_settings()
+    provider = TesseractOCRProvider(settings)
+    installed_packs = provider.installed_language_packs() or settings.ocr_languages_installed_packs
+    configured_packs = settings.ocr_languages_installed_packs
+    missing_packs = sorted(configured_packs - installed_packs)
+    tesseract_available = provider.is_available()
+    pillow_available = _module_available("PIL")
+    opencv_available = _module_available("cv2")
+    pdf_available = _module_available("pypdf") and _module_available("fitz")
+    vision_configured = settings.vision_provider_active
+
+    return {
+        "tesseract": {
+            "configured": True,
+            "required": True,
+            "healthy": tesseract_available,
+            "latencyMs": 0,
+            "safeError": None if tesseract_available else "OCR_ENGINE_UNAVAILABLE",
+        },
+        "ocrLanguagePacks": {
+            "configured": bool(configured_packs),
+            "required": True,
+            "healthy": tesseract_available and not missing_packs,
+            "latencyMs": 0,
+            "safeError": None if not missing_packs else "OCR_LANGUAGE_PACK_MISSING",
+        },
+        "opencv": {
+            "configured": True,
+            "required": True,
+            "healthy": opencv_available,
+            "latencyMs": 0,
+            "safeError": None if opencv_available else "UNAVAILABLE",
+        },
+        "pillow": {
+            "configured": True,
+            "required": True,
+            "healthy": pillow_available,
+            "latencyMs": 0,
+            "safeError": None if pillow_available else "UNAVAILABLE",
+        },
+        "pdf": {
+            "configured": True,
+            "required": True,
+            "healthy": pdf_available,
+            "latencyMs": 0,
+            "safeError": None if pdf_available else "UNAVAILABLE",
+        },
+        "visionProvider": {
+            "configured": settings.VISION_PROVIDER_ENABLED,
+            "required": False,
+            "healthy": vision_configured or not settings.VISION_PROVIDER_ENABLED,
+            "latencyMs": 0,
+            "safeError": None
+            if vision_configured or not settings.VISION_PROVIDER_ENABLED
+            else "VISION_PROVIDER_DISABLED",
+        },
+    }
+
+
 @router.get("/health")
 async def health() -> dict[str, str]:
     settings = get_settings()
@@ -93,6 +159,7 @@ async def ready() -> JSONResponse:
             "safeError": None,
         },
         "redis": await redis_readiness(),
+        **media_dependency_readiness(),
     }
     is_ready = all(
         not dependency["required"] or dependency["healthy"] for dependency in checks.values()

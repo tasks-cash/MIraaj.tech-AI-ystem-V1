@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { UnauthorizedException } from "@nestjs/common";
+import { ALL_TEMPORARY_ADMIN_PERMISSIONS } from "@miraaj/shared-config";
 import { resetEnvironmentCache } from "../../environment.js";
 import { AdminAuthGuard } from "./guards/admin-auth.guard.js";
 
@@ -71,7 +72,7 @@ describe("AdminAuthGuard", () => {
       guard.canActivate(context as never),
     ).toBe(true);
     expect(context.request).toMatchObject({
-      adminPermissions: ["ai.systemStatus.read"],
+      adminPermissions: ALL_TEMPORARY_ADMIN_PERMISSIONS,
     });
   });
 });

@@ -4,10 +4,10 @@ import {
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
-import { AI_PERMISSIONS } from "@miraaj/shared-config";
+import { ALL_TEMPORARY_ADMIN_PERMISSIONS } from "@miraaj/shared-config";
 import { loadEnvironment } from "../../../environment.js";
 import { secureTokenEquals } from "../../../internal-auth.js";
-import type { TemporaryAdminRequest } from "./ai-system-status-permission.guard.js";
+import type { TemporaryAdminRequest } from "../types/admin-request.js";
 
 @Injectable()
 export class AdminAuthGuard implements CanActivate {
@@ -36,7 +36,7 @@ export class AdminAuthGuard implements CanActivate {
         message: "Admin authentication is required.",
       });
     }
-    request.adminPermissions = [AI_PERMISSIONS.SYSTEM_STATUS_READ];
+    request.adminPermissions = ALL_TEMPORARY_ADMIN_PERMISSIONS;
     return true;
   }
 }

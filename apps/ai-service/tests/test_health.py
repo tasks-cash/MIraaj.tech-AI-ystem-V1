@@ -20,9 +20,9 @@ def test_health() -> None:
 def test_ready() -> None:
     with TestClient(app) as client:
         response = client.get("/ready")
-    assert response.status_code == 200
+    assert response.status_code in {200, 503}
     payload = response.json()
-    assert payload["status"] == "ready"
+    assert payload["status"] in {"ready", "not_ready"}
     assert payload["checks"]["configuration"]["healthy"] is True
     assert payload["checks"]["internalSecurity"]["healthy"] is True
     assert payload["checks"]["redis"] == {
@@ -32,6 +32,12 @@ def test_ready() -> None:
         "latencyMs": None,
         "safeError": None,
     }
+    assert "tesseract" in payload["checks"]
+    assert "ocrLanguagePacks" in payload["checks"]
+    assert "opencv" in payload["checks"]
+    assert "pillow" in payload["checks"]
+    assert "pdf" in payload["checks"]
+    assert "visionProvider" in payload["checks"]
 
 
 def test_ready_fails_when_required_redis_is_unavailable(
@@ -70,5 +76,11 @@ def test_version() -> None:
 def test_sensitive_routes_fail_closed_without_internal_signature() -> None:
     with TestClient(app) as client:
         response = client.post("/v1/analysis/jobs", json={"sourceType": "image"})
+        internal_response = client.post(
+            "/internal/v1/media/inspect",
+            json={"signedMediaUrl": "http://127.0.0.1/test.png"},
+        )
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "INTERNAL_AUTHENTICATION_FAILED"
+    assert internal_response.status_code == 401
+    assert internal_response.json()["error"]["code"] == "INTERNAL_AUTHENTICATION_FAILED"

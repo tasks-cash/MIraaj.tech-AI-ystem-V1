@@ -7,6 +7,24 @@ import {
 } from "./types/ai-errors.js";
 import { AiHealthService } from "./ai-health.service.js";
 
+vi.mock("./models/analysis-job.schema.js", () => ({
+  AnalysisJobModel: {
+    countDocuments: vi.fn().mockResolvedValue(0),
+  },
+}));
+
+vi.mock("./models/analysis-result.schema.js", () => ({
+  AnalysisResultModel: {
+    countDocuments: vi.fn().mockResolvedValue(0),
+  },
+}));
+
+vi.mock("../../s3-client.js", () => ({
+  createS3Client: vi.fn(() => ({
+    send: vi.fn().mockRejectedValue(new Error("minio unavailable")),
+  })),
+}));
+
 const baseEnv = {
   NODE_ENV: "test",
   APP_ENV: "test",
@@ -125,6 +143,21 @@ describe("AI health service", () => {
     };
     const service = new AiHealthService(
       client as unknown as AiInternalClientService,
+      {
+        dependencyStatus: () =>
+          Promise.resolve({ mongo: "ready" as const, redis: "ready" as const }),
+      } as never,
+      {
+        getQueueStats: () =>
+          Promise.resolve({
+            validate: { waiting: 0, active: 0, completed: 0, failed: 0 },
+            analyze: { waiting: 0, active: 0, completed: 0, failed: 0 },
+            deadLetter: { waiting: 0, active: 0, completed: 0, failed: 0 },
+          }),
+      } as never,
+      {
+        reconcileStaleJobs: () => Promise.resolve(0),
+      } as never,
     );
     const status = await service.getSystemStatus();
     expect(status.error?.code).toBe("AI_SERVICE_UNAVAILABLE");
