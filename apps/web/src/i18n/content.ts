@@ -10,12 +10,17 @@ export interface SiteCopy {
 const en: SiteCopy = {
   nav: { services: "Services", solutions: "Solutions", work: "Work", about: "About", insights: "Insights", start: "Start your project" },
   hero: {
-    eyebrow: "Digital products built around your business",
-    title: "Turn your idea into a digital product that works and grows.",
-    description: "We design and build websites, apps, systems, AI, automation and payment experiences—from first idea to launch and support.",
-    primary: "Start your project",
-    secondary: "Explore our services",
-    assurances: ["A clear, timely response", "A plan shaped around your needs", "No technical background required"],
+    eyebrow: "AI Systems for Real Business Operations",
+    title: "Transform Your Business With Intelligent Systems",
+    description:
+      "Miraaj.tech analyzes business context, identifies operational needs and helps organizations build secure AI, automation and digital solutions adapted to their market.",
+    primary: "Explore AI Solutions",
+    secondary: "Discover How It Works",
+    assurances: [
+      "Business-context analysis",
+      "Explainable recommendations",
+      "Human review for sensitive cases",
+    ],
   },
   sections: { build: "Everything your digital business needs, in one place.", process: "From first idea to first user.", ai: "AI that works inside your business—not a feature for show.", payments: "Make payment easier for your customers.", solutions: "Solutions shaped around the way you operate.", work: "Ideas turned into digital experiences.", why: "Clear technology, delivered around your business.", faq: "Questions, answered clearly." },
   common: { learnMore: "Learn more", viewConcept: "View concept", concept: "Concept", contact: "Talk to us", quote: "Request a quote", search: "Search", menu: "Menu", close: "Close", previous: "Previous", next: "Next", submit: "Submit" },
@@ -26,12 +31,13 @@ const en: SiteCopy = {
 const ar: SiteCopy = {
   nav: { services: "الخدمات", solutions: "الحلول", work: "أعمالنا", about: "من نحن", insights: "المقالات", start: "ابدأ مشروعك" },
   hero: {
-    eyebrow: "منتجات رقمية مبنية حول مشروعك",
-    title: "حوّل فكرتك إلى منتج رقمي يعمل وينمو.",
-    description: "نصمم ونطور المواقع والتطبيقات والأنظمة وحلول الذكاء الاصطناعي والأتمتة ووسائل الدفع، من أول فكرة إلى الإطلاق والدعم.",
-    primary: "ابدأ مشروعك",
-    secondary: "استكشف خدماتنا",
-    assurances: ["رد واضح وسريع", "خطة مناسبة لاحتياجك", "لا تحتاج إلى معرفة تقنية مسبقة"],
+    eyebrow: "أنظمة ذكاء اصطناعي للعمليات التشغيلية الحقيقية",
+    title: "حوّل عملك بأنظمة ذكية",
+    description:
+      "تحلّل Miraaj.tech سياق العمل، وتحدد الاحتياجات التشغيلية، وتساعد المؤسسات على بناء حلول آمنة للذكاء الاصطناعي والأتمتة والتحول الرقمي بما يناسب سوقها.",
+    primary: "استكشف حلول الذكاء الاصطناعي",
+    secondary: "اكتشف كيف يعمل النظام",
+    assurances: ["تحليل لسياق العمل", "توصيات قابلة للتفسير", "مراجعة بشرية للحالات الحساسة"],
   },
   sections: { build: "كل ما يحتاجه مشروعك الرقمي، في مكان واحد.", process: "من أول فكرة إلى أول مستخدم.", ai: "ذكاء اصطناعي يعمل داخل مشروعك، لا مجرد ميزة للعرض.", payments: "اجعل الدفع أسهل لعملائك.", solutions: "حلول مبنية حول طريقة عمل مشروعك.", work: "أفكار تحولت إلى تجارب رقمية.", why: "تقنية مفهومة، وتنفيذ يناسب مشروعك.", faq: "إجابات واضحة عن أسئلتك." },
   common: { learnMore: "معرفة المزيد", viewConcept: "عرض المشروع التجريبي", concept: "مشروع تصوري", contact: "تحدث معنا", quote: "اطلب عرضًا", search: "بحث", menu: "القائمة", close: "إغلاق", previous: "السابق", next: "التالي", submit: "إرسال" },
@@ -42,7 +48,19 @@ const ar: SiteCopy = {
 const fr: SiteCopy = {
   ...en,
   nav: { services: "Services", solutions: "Solutions", work: "Réalisations", about: "À propos", insights: "Ressources", start: "Démarrer votre projet" },
-  hero: { eyebrow: "Des produits numériques pensés pour votre activité", title: "Transformez votre idée en un produit numérique utile et évolutif.", description: "Sites, applications, IA, automatisation et paiements : nous construisons une solution claire, de l'idée au lancement.", primary: "Démarrer votre projet", secondary: "Découvrir nos services", assurances: ["Réponse claire et rapide", "Plan adapté à vos besoins", "Aucune expertise technique requise"] },
+  hero: {
+    eyebrow: "Systèmes d'IA pour les opérations métier réelles",
+    title: "Transformez votre activité avec des systèmes intelligents",
+    description:
+      "Miraaj.tech analyse le contexte métier, identifie les besoins opérationnels et aide les organisations à concevoir des solutions sécurisées d'IA, d'automatisation et de digital adaptées à leur marché.",
+    primary: "Explorer les solutions d'IA",
+    secondary: "Découvrir le fonctionnement",
+    assurances: [
+      "Analyse du contexte métier",
+      "Recommandations explicables",
+      "Revue humaine pour les cas sensibles",
+    ],
+  },
   announcement: "Vous avez une idée ? Confiez-la-nous pour la transformer en plan d'exécution clair.",
   marketLine: "Des services numériques adaptés aux entreprises en {country}.",
 };

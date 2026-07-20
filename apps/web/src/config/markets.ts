@@ -40,6 +40,7 @@ const providerMap: Record<Region, string[]> = {
 const seeds: MarketSeed[] = [
   ["global", "en", "Global", "English", "English", "USD", "$", "", "global", "UTC"],
   ["global", "ar", "العالم", "Arabic", "العربية", "USD", "$", "", "global", "UTC"],
+  ["global", "fr", "Global", "French", "Français", "USD", "$", "", "global", "UTC"],
   ["dz", "ar", "الجزائر", "Arabic", "العربية", "DZD", "د.ج", "+213", "north-africa", "Africa/Algiers"],
   ["dz", "fr", "Algérie", "French", "Français", "DZD", "DA", "+213", "north-africa", "Africa/Algiers"],
   ["ae", "ar", "الإمارات", "Arabic", "العربية", "AED", "د.إ", "+971", "gulf", "Asia/Dubai"],

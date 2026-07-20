@@ -1,37 +1,53 @@
 import { notFound } from "next/navigation";
 import { getMarket } from "@/config/markets";
-import { getCopy } from "@/i18n/content";
-import { interpolate } from "@/lib/site";
+import { getHomeCopy } from "@/i18n/home-copy";
 import {
-  AiShowcase,
-  FinalCtaAndFaq,
+  AiSystemOverview,
+  AnalysisCapabilities,
+  AutomationSection,
+  BusinessIntelligenceSection,
+  CoreAiSolutions,
+  ExplorerSection,
+  FinalCtaSection,
   HomeHero,
-  PaymentShowcase,
-  ProcessSection,
-  ServicesGrid,
-  ServiceStrip,
-  SolutionsWorkAndWhy,
-} from "@/components/sections/home-sections";
-import { Container } from "@/components/ui/core";
+  ImplementationSection,
+  IndustrySolutions,
+  MarketLineBanner,
+  MultilingualSection,
+  SecuritySection,
+  ServiceRecommendationSection,
+  TrustStrip,
+  WhyMiraajSection,
+} from "@/components/sections/home/home-page-sections";
 
-export default async function HomePage({ params }: { params: Promise<{ country: string; locale: string }> }) {
+export default async function HomePage({
+  params,
+}: {
+  params: Promise<{ country: string; locale: string }>;
+}) {
   const { country, locale } = await params;
   const market = getMarket(country, locale);
   if (!market) notFound();
-  const copy = getCopy(locale);
+  const copy = getHomeCopy(locale);
+
   return (
     <>
       <HomeHero market={market} copy={copy} />
-      <ServiceStrip market={market} />
-      <div className="border-b border-blue-100 bg-blue-50/70 py-3 text-center text-sm font-semibold text-blue-950">
-        <Container>{interpolate(copy.marketLine, { country: market.countryName })} · {market.currencyCode}</Container>
-      </div>
-      <ServicesGrid market={market} copy={copy} />
-      <ProcessSection copy={copy} />
-      <AiShowcase market={market} copy={copy} />
-      <PaymentShowcase market={market} copy={copy} />
-      <SolutionsWorkAndWhy market={market} copy={copy} />
-      <FinalCtaAndFaq market={market} copy={copy} />
+      <TrustStrip copy={copy} />
+      <MarketLineBanner market={market} copy={copy} />
+      <AiSystemOverview copy={copy} />
+      <CoreAiSolutions market={market} copy={copy} />
+      <AnalysisCapabilities copy={copy} />
+      <BusinessIntelligenceSection copy={copy} />
+      <ServiceRecommendationSection copy={copy} />
+      <AutomationSection copy={copy} />
+      <IndustrySolutions copy={copy} />
+      <MultilingualSection copy={copy} />
+      <SecuritySection copy={copy} />
+      <ExplorerSection market={market} copy={copy} />
+      <WhyMiraajSection copy={copy} />
+      <ImplementationSection copy={copy} />
+      <FinalCtaSection market={market} copy={copy} />
     </>
   );
 }

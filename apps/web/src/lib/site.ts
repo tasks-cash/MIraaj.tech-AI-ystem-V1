@@ -3,7 +3,10 @@ import { company, siteUrl } from "@/config/company";
 import { enabledMarkets, getMarket } from "@/config/markets";
 
 export function localizedHref(country: string, locale: string, path = "") {
-  const normalized = path === "/" ? "" : path.startsWith("/") ? path : `/${path}`;
+  if (!path || path === "/") {
+    return `/${country}/${locale}`;
+  }
+  const normalized = path.startsWith("/") ? path : `/${path}`;
   return `/${country}/${locale}${normalized}`;
 }
 
@@ -25,10 +28,10 @@ export function localizedMetadata(
 ): Metadata {
   const market = getMarket(country, locale);
   const baseTitles: Record<string, string> = {
-    ar: "تطوير المواقع والتطبيقات وحلول الذكاء الاصطناعي",
-    de: "Webentwicklung, Apps und KI-Lösungen",
-    fr: "Sites, applications et solutions IA",
-    en: "Web, Apps, AI and Digital Solutions",
+    ar: "أنظمة الذكاء الاصطناعي والحلول الرقمية للأعمال",
+    de: "KI-Systeme und digitale Business-Lösungen",
+    fr: "Systèmes d'IA et solutions numériques pour les entreprises",
+    en: "AI Systems and Digital Solutions for Business",
   };
   const title = pageTitle
     ? `${pageTitle} | ${company.companyName}`
