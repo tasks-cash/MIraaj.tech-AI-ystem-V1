@@ -382,21 +382,53 @@ export class CampaignWorkerService implements OnModuleInit, OnModuleDestroy {
           : [],
       });
 
-      const languageVariants = this.buildLanguageVariants({
+      await CampaignJobModel.updateOne(
+        { campaignJobId },
+        {
+          status: "transcreating",
+          currentStage: "transcreating",
+          lastHeartbeatAt: new Date(),
+        },
+      );
+
+      const masterSourceText = [
+        `Miraaj.tech can help ${source.businessProfile.businessType.code} teams explore approved digital systems.`,
+        `Focus services: ${jobRecord.selectedServiceIds.slice(0, 5).join(", ")}.`,
+        "No guaranteed outcomes. Discovery and consultation only.",
+      ].join(" ");
+
+      const languageVariants = await this.buildLanguageVariants({
         languages: jobRecord.targetLanguages,
         locales: jobRecord.targetLocales,
+        countries: jobRecord.targetCountries,
         baseLanguage: jobRecord.baseLanguage,
+        sourceText: masterSourceText,
         includesPayment,
-        providerDisabled:
+        protectedTerms: brand.protectedTerms ?? ["Miraaj.tech", "Tasks.cash"],
+        businessType: source.businessProfile.businessType.code,
+        translationProviderDisabled:
           (jobRecord.translationProviderPreference ??
             this.environment.AI_TRANSLATION_PROVIDER) === "disabled",
+        correlationId: jobRecord.correlationId,
+        requestId: jobRecord.requestId,
       });
 
       if (
-        languageVariants.some((variant) => variant.requiresReview) &&
+        languageVariants.some((variant) =>
+          (variant.reviewReasonCodes as string[] | undefined)?.includes(
+            "translation_unavailable",
+          ),
+        ) &&
         jobRecord.targetLanguages.length > 1
       ) {
         reviewReasonCodes.push("translation_unavailable");
+      }
+      if (
+        languageVariants.some((variant) =>
+          (variant.reviewReasonCodes as string[] | undefined)?.includes("semantic_drift"),
+        )
+      ) {
+        reviewReasonCodes.push("semantic_drift");
       }
 
       const imageBriefs = jobRecord.selectedPlatforms.map((platform) => ({
@@ -439,12 +471,36 @@ export class CampaignWorkerService implements OnModuleInit, OnModuleDestroy {
           reviewStatus: "pending",
         }));
 
+      const carouselBriefs = this.buildCarouselBriefs({
+        platforms: jobRecord.selectedPlatforms,
+        language: jobRecord.baseLanguage,
+        locale: jobRecord.sourceLocale,
+        businessType: source.businessProfile.businessType.code,
+        services: jobRecord.selectedServiceIds,
+        includesPayment,
+      });
+
+      const storySequences = this.buildStorySequences({
+        platforms: jobRecord.selectedPlatforms,
+        language: jobRecord.baseLanguage,
+        locale: jobRecord.sourceLocale,
+        businessType: source.businessProfile.businessType.code,
+        objective: jobRecord.objective,
+      });
+
       const allTexts = [
         ...platformVariants.map((variant) => variant.primaryText ?? ""),
-        ...languageVariants.map(
-          (variant) =>
-            variant.transcreatedText ?? variant.translatedText ?? variant.sourceText ?? "",
-        ),
+        ...languageVariants.map((variant) => {
+          const transcreated =
+            typeof variant.transcreatedText === "string"
+              ? variant.transcreatedText
+              : "";
+          const translated =
+            typeof variant.translatedText === "string" ? variant.translatedText : "";
+          const source =
+            typeof variant.sourceText === "string" ? variant.sourceText : "";
+          return transcreated || translated || source;
+        }),
       ];
 
       await CampaignJobModel.updateOne(
@@ -523,7 +579,10 @@ export class CampaignWorkerService implements OnModuleInit, OnModuleDestroy {
       );
 
       const languageVariantScores = languageVariants.map((variant) => ({
-        semanticPreservationScore: variant.semanticPreservationScore ?? null,
+        semanticPreservationScore:
+          typeof variant.semanticPreservationScore === "number"
+            ? variant.semanticPreservationScore
+            : null,
         requiresReview: Boolean(variant.requiresReview),
       }));
 
@@ -611,8 +670,8 @@ export class CampaignWorkerService implements OnModuleInit, OnModuleDestroy {
         platformVariants,
         imageCreativeBriefs: imageBriefs,
         videoCreativeBriefs: videoBriefs,
-        carouselBriefs: [],
-        storySequences: [],
+        carouselBriefs,
+        storySequences,
         ctaVariants: [
           {
             code: jobRecord.destinationReference
@@ -660,6 +719,7 @@ export class CampaignWorkerService implements OnModuleInit, OnModuleDestroy {
           "building_brief",
           "building_strategy",
           "generating_platforms",
+          "transcreating",
           "validating",
           "scoring",
         ],
@@ -802,26 +862,69 @@ export class CampaignWorkerService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private buildLanguageVariants(input: {
+  private async buildLanguageVariants(input: {
     languages: string[];
     locales: string[];
+    countries: string[];
     baseLanguage: string;
+    sourceText: string;
     includesPayment: boolean;
-    providerDisabled: boolean;
+    protectedTerms: string[];
+    businessType: string;
+    translationProviderDisabled: boolean;
+    correlationId?: string | null;
+    requestId?: string | null;
   }) {
-    return input.languages.map((language, index) => {
+    const variants: Array<Record<string, unknown>> = [];
+    for (let index = 0; index < input.languages.length; index += 1) {
+      const language = input.languages[index]!;
       const locale = input.locales[index] ?? language;
-      const sourceText =
-        "Miraaj.tech provides practical digital systems based on approved recommendations.";
+      const countryCode = input.countries[index] ?? input.countries[0] ?? null;
       const isBase = language === input.baseLanguage;
-      if (!isBase && input.providerDisabled) {
-        return {
+      const disclosure =
+        language === "ar"
+          ? CAMPAIGN_PAYMENT_DISCLOSURES.ar
+          : language === "fr"
+            ? CAMPAIGN_PAYMENT_DISCLOSURES.fr
+            : CAMPAIGN_PAYMENT_DISCLOSURES.en;
+      const sourceWithDisclosure = input.includesPayment
+        ? `${input.sourceText}\n\n${disclosure}`
+        : input.sourceText;
+
+      if (isBase) {
+        variants.push({
+          languageVariantId: randomUUID(),
+          language,
+          locale,
+          direction: isRtlLanguage(language) ? "rtl" : "ltr",
+          strategy: "source_language_only",
+          sourceText: sourceWithDisclosure,
+          translatedText: sourceWithDisclosure,
+          transcreatedText: sourceWithDisclosure,
+          provider: "deterministic",
+          model: "none",
+          qualityScore: 0.9,
+          semanticPreservationScore: 1,
+          compliancePreservationScore: 1,
+          protectedTermChecks: input.protectedTerms.map((term) => ({
+            term,
+            preserved: true,
+          })),
+          requiresReview: false,
+          reviewReasonCodes: [],
+          status: "draft",
+        });
+        continue;
+      }
+
+      if (input.translationProviderDisabled) {
+        variants.push({
           languageVariantId: randomUUID(),
           language,
           locale,
           direction: isRtlLanguage(language) ? "rtl" : "ltr",
           strategy: "unavailable",
-          sourceText,
+          sourceText: sourceWithDisclosure,
           provider: "unavailable",
           qualityScore: 0,
           semanticPreservationScore: 0,
@@ -829,36 +932,201 @@ export class CampaignWorkerService implements OnModuleInit, OnModuleDestroy {
           requiresReview: true,
           reviewReasonCodes: ["translation_unavailable"],
           status: "pending_review",
-        };
+        });
+        continue;
       }
-      const disclosure =
-        language === "ar"
-          ? CAMPAIGN_PAYMENT_DISCLOSURES.ar
-          : language === "fr"
-            ? CAMPAIGN_PAYMENT_DISCLOSURES.fr
-            : CAMPAIGN_PAYMENT_DISCLOSURES.en;
-      return {
-        languageVariantId: randomUUID(),
-        language,
-        locale,
-        direction: isRtlLanguage(language) ? "rtl" : "ltr",
-        strategy: isBase ? "source_language_only" : "transcreation",
-        sourceText,
-        translatedText: sourceText,
-        transcreatedText: input.includesPayment
-          ? `${sourceText}\n\n${disclosure}`
-          : sourceText,
-        provider: isBase ? "deterministic" : "deterministic-shell",
-        model: "none",
-        qualityScore: 0.85,
-        semanticPreservationScore: 0.95,
-        compliancePreservationScore: 0.97,
-        protectedTermChecks: [{ term: "Miraaj.tech", preserved: true }],
-        requiresReview: !isBase,
-        reviewReasonCodes: !isBase ? ["untested_locale"] : [],
-        status: "draft",
-      };
-    });
+
+      try {
+        const response = await this.aiClient.postCampaignTranscreate(
+          {
+            schemaVersion: "1.0",
+            sourceVariant: {
+              headline: `Practical systems for ${input.businessType}`,
+              primaryText: sourceWithDisclosure,
+              shortText: sourceWithDisclosure.slice(0, 280),
+              cta: "request_consultation",
+              hashtags: ["#Miraaj"],
+              keywords: [],
+              disclosures: input.includesPayment ? [disclosure] : [],
+              direction: isRtlLanguage(input.baseLanguage) ? "rtl" : "ltr",
+            },
+            sourceLanguage: input.baseLanguage,
+            targetLanguage: language,
+            targetLocale: locale,
+            ...(countryCode ? { countryCode } : {}),
+            businessSector: input.businessType,
+            protectedTerms: input.protectedTerms,
+            brandTerminology: input.protectedTerms,
+            paymentServicePresent: input.includesPayment,
+            localizationMode: "transcreation",
+          },
+          {
+            ...(input.requestId ? { requestId: input.requestId } : {}),
+            ...(input.correlationId ? { correlationId: input.correlationId } : {}),
+          },
+        );
+
+        const accepted = response.accepted === true;
+        const data =
+          response.data && typeof response.data === "object"
+            ? (response.data as Record<string, unknown>)
+            : null;
+        const providerVariant =
+          data?.variant && typeof data.variant === "object"
+            ? (data.variant as Record<string, unknown>)
+            : null;
+        const transcreatedText =
+          typeof providerVariant?.primaryText === "string" &&
+          providerVariant.primaryText.length > 0
+            ? providerVariant.primaryText
+            : sourceWithDisclosure;
+        const reviewCodes = Array.isArray(data?.reviewReasonCodes)
+          ? (data.reviewReasonCodes as string[])
+          : [];
+        const semanticScore =
+          typeof data?.semanticPreservationScore === "number"
+            ? data.semanticPreservationScore
+            : 0.9;
+        const requiresReview =
+          Boolean(data?.requiresReview) ||
+          !accepted ||
+          semanticScore < this.environment.CAMPAIGN_SEMANTIC_PRESERVATION_MIN;
+
+        if (!accepted) {
+          reviewCodes.push("translation_unavailable");
+        }
+        if (semanticScore < this.environment.CAMPAIGN_SEMANTIC_PRESERVATION_MIN) {
+          reviewCodes.push("semantic_drift");
+        }
+
+        variants.push({
+          languageVariantId: randomUUID(),
+          language,
+          locale,
+          direction: isRtlLanguage(language) ? "rtl" : "ltr",
+          strategy: "transcreation",
+          sourceText: sourceWithDisclosure,
+          translatedText: transcreatedText,
+          transcreatedText,
+          provider:
+            typeof data?.provider === "string" ? data.provider : "campaign-provider",
+          model: typeof data?.model === "string" ? data.model : "",
+          qualityScore: typeof providerVariant?.confidence === "number"
+            ? providerVariant.confidence
+            : 0.85,
+          semanticPreservationScore: semanticScore,
+          compliancePreservationScore: input.includesPayment ? 0.97 : 0.95,
+          protectedTermChecks: input.protectedTerms.map((term) => ({
+            term,
+            preserved: transcreatedText.includes(term),
+          })),
+          requiresReview,
+          reviewReasonCodes: [...new Set(reviewCodes)],
+          status: requiresReview ? "pending_review" : "draft",
+        });
+
+        this.logger.info(
+          {
+            event: "ai.campaign.transcreation.completed",
+            language,
+            locale,
+            requiresReview,
+          },
+          "Campaign language variant transcreated",
+        );
+      } catch {
+        variants.push({
+          languageVariantId: randomUUID(),
+          language,
+          locale,
+          direction: isRtlLanguage(language) ? "rtl" : "ltr",
+          strategy: "unavailable",
+          sourceText: sourceWithDisclosure,
+          provider: "unavailable",
+          qualityScore: 0,
+          semanticPreservationScore: 0,
+          compliancePreservationScore: 0,
+          requiresReview: true,
+          reviewReasonCodes: ["translation_unavailable", "language_variant_failed"],
+          status: "pending_review",
+        });
+      }
+    }
+    return variants;
+  }
+
+  private buildCarouselBriefs(input: {
+    platforms: CampaignPlatform[];
+    language: string;
+    locale: string;
+    businessType: string;
+    services: string[];
+    includesPayment: boolean;
+  }) {
+    return input.platforms
+      .filter((platform) =>
+        ["facebook", "instagram", "linkedin"].includes(platform),
+      )
+      .map((platform) => ({
+        carouselBriefId: randomUUID(),
+        carouselTitle: `${input.businessType} capability walkthrough`,
+        objective: "education",
+        platform,
+        language: input.language,
+        locale: input.locale,
+        maximumSlides: 6,
+        coverSlide: {
+          headline: `Systems for ${input.businessType}`,
+          body: "Start with approved operational foundations.",
+          purpose: "cover",
+        },
+        educationalSlides: input.services.slice(0, 3).map((service) => ({
+          headline: service,
+          body: "Capability description from the approved service catalog only.",
+          purpose: "education",
+        })),
+        ctaSlide: {
+          headline: "Request a consultation",
+          body: "No guaranteed outcomes. Discovery first.",
+          purpose: "cta",
+        },
+        requiredDisclosure: input.includesPayment
+          ? CAMPAIGN_PAYMENT_DISCLOSURES.en
+          : null,
+        reviewState: "pending",
+      }));
+  }
+
+  private buildStorySequences(input: {
+    platforms: CampaignPlatform[];
+    language: string;
+    locale: string;
+    businessType: string;
+    objective: string;
+  }) {
+    return input.platforms
+      .filter((platform) =>
+        ["instagram", "facebook", "whatsapp_status"].includes(platform),
+      )
+      .map((platform) => ({
+        storySequenceId: randomUUID(),
+        sequenceTitle: `${input.businessType} story sequence`,
+        objective: input.objective,
+        platform,
+        language: input.language,
+        locale: input.locale,
+        direction: isRtlLanguage(input.language) ? "rtl" : "ltr",
+        frameCount: 4,
+        frame1Hook: "Name the operational friction clearly.",
+        middleFrames: [
+          "Show one approved capability.",
+          "Explain the next practical step.",
+        ],
+        CTAFrame: "Invite a consultation without urgency claims.",
+        disclosureFrame: null,
+        accessibilityText: "Story sequence describing Miraaj.tech service capabilities.",
+        reviewState: "pending",
+      }));
   }
 
   private async failJob(

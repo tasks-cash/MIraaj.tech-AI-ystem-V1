@@ -14,6 +14,7 @@ import {
   CAMPAIGN_TYPES,
   CONTENT_FORMATS,
   FUNNEL_STAGES,
+  getLanguageDefinition,
   isRegulatedBusinessType,
   type BusinessType,
   type CampaignJobStatus,
@@ -306,7 +307,7 @@ export class CampaignJobService {
     const bullJob = await this.queue.enqueueBuildCampaign({
       campaignJobId: job.campaignJobId,
       recommendationSetId: job.recommendationSetId,
-    });
+    }, { uniqueJobId: true });
     job.bullJobId = String(bullJob.id);
     await job.save();
     this.logger.info(
@@ -359,7 +360,7 @@ export class CampaignJobService {
     }
     if (!(CAMPAIGN_TYPES as readonly string[]).includes(input.campaignType)) {
       throw new BadRequestException({
-        code: "CAMPAIGN_OBJECTIVE_INVALID",
+        code: "CAMPAIGN_TYPE_INVALID",
         message: "Unsupported campaign type.",
       });
     }
@@ -390,6 +391,31 @@ export class CampaignJobService {
         code: "CAMPAIGN_LANGUAGE_UNSUPPORTED",
         message: "At least one target language is required.",
       });
+    }
+    for (const language of input.targetLanguages) {
+      if (!getLanguageDefinition(language)) {
+        throw new BadRequestException({
+          code: "CAMPAIGN_LANGUAGE_UNSUPPORTED",
+          message: `Unsupported campaign language: ${language}.`,
+        });
+      }
+    }
+    for (const locale of input.targetLocales ?? []) {
+      const languagePart = locale.split("-")[0] ?? locale;
+      if (!getLanguageDefinition(locale) && !getLanguageDefinition(languagePart)) {
+        throw new BadRequestException({
+          code: "CAMPAIGN_LOCALE_INVALID",
+          message: `Unsupported campaign locale: ${locale}.`,
+        });
+      }
+    }
+    for (const country of input.targetCountries ?? []) {
+      if (!/^[A-Za-z]{2}$/.test(country)) {
+        throw new BadRequestException({
+          code: "CAMPAIGN_COUNTRY_INVALID",
+          message: `Invalid country code: ${country}.`,
+        });
+      }
     }
     if (input.selectedServiceIds.length === 0) {
       throw new BadRequestException({

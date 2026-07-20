@@ -841,7 +841,20 @@ routes. Permissions: `ai.campaigns.*`, `ai.campaignBriefs.*`,
 `ai.brandProfiles.*`, `ai.campaignPolicies.*`, `ai.platformPolicies.*`,
 `ai.compliancePolicies.*`, `ai.translationGlossaries.*`.
 
-### 28.8 Out of scope (later)
+### 28.8 Transcreation and creative briefs
+
+Language variants call FastAPI `/internal/v1/campaigns/transcreate` when
+translation is enabled. Disabled translation leaves non-base languages as
+`translation_unavailable` without fabricating copy. Packages include image,
+video, carousel and story **text briefs only** (no rendering).
+
+### 28.9 Review, regenerate and revisions
+
+Corrections bump `currentRevision` and persist feedback. Regeneration
+supersedes the package and re-enqueues the parent BullMQ job with a unique
+job id. Approval remains fail-closed on audit write.
+
+### 28.10 Out of scope (later)
 
 Social OAuth/publishing, ad accounts, tracked links/UTM beyond placeholders, QR,
 Tasks.cash, landing pages, lead capture, billing, speech/TTS, image/video

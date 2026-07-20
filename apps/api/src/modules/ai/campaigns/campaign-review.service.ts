@@ -1,9 +1,15 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { createLogger } from "@miraaj/shared-logging";
-import type { CampaignReviewStatus } from "@miraaj/shared-types";
+import type { CampaignReviewReasonCode, CampaignReviewStatus } from "@miraaj/shared-types";
 import { loadEnvironment } from "../../../environment.js";
 import { AuditEventService } from "../audit/audit-event.service.js";
+import { CampaignQueueService } from "../queue/campaign-queue.service.js";
 import {
   CampaignFeedbackModel,
   CampaignJobModel,
@@ -41,12 +47,16 @@ export class CampaignReviewService {
   constructor(
     @Inject(AuditEventService)
     private readonly auditEvents: AuditEventService,
+    @Inject(CampaignQueueService)
+    private readonly campaignQueue: CampaignQueueService,
   ) {}
 
   async listPackages(input?: {
     status?: string | undefined;
     language?: string | undefined;
     platform?: string | undefined;
+    objective?: string | undefined;
+    requiresReview?: string | undefined;
     limit?: number | undefined;
     offset?: number | undefined;
   }) {
@@ -61,6 +71,15 @@ export class CampaignReviewService {
     }
     if (input?.platform) {
       filter.selectedPlatforms = input.platform;
+    }
+    if (input?.objective) {
+      filter.objective = input.objective;
+    }
+    if (input?.requiresReview === "true") {
+      filter.requiresReview = true;
+    }
+    if (input?.requiresReview === "false") {
+      filter.requiresReview = false;
     }
     const [items, total] = await Promise.all([
       CampaignPackageModel.find(filter)
@@ -107,6 +126,9 @@ export class CampaignReviewService {
       });
     }
 
+    const previousRevision = pkg.currentRevision;
+    let newRevision = previousRevision;
+
     pkg.reviewStatus = input.status;
     pkg.reviewerId = input.reviewerId;
     switch (input.status) {
@@ -119,8 +141,31 @@ export class CampaignReviewService {
         pkg.status = "rejected";
         pkg.rejectedAt = new Date();
         break;
-      case "corrected":
+      case "corrected": {
+        newRevision = previousRevision + 1;
+        pkg.currentRevision = newRevision;
         pkg.status = "corrected";
+        if (input.corrections) {
+          const allowed = [
+            "masterMessageFramework",
+            "platformVariants",
+            "languageVariants",
+            "imageCreativeBriefs",
+            "videoCreativeBriefs",
+            "requiredDisclosures",
+            "warnings",
+          ] as const;
+          for (const key of allowed) {
+            if (key in input.corrections) {
+              (pkg as unknown as Record<string, unknown>)[key] = input.corrections[key];
+            }
+          }
+        }
+        break;
+      }
+      case "needs_regeneration":
+        pkg.status = "awaiting_review";
+        pkg.reviewStatus = "needs_regeneration";
         break;
       default:
         pkg.status = "awaiting_review";
@@ -131,7 +176,7 @@ export class CampaignReviewService {
     await CampaignReviewModel.create({
       reviewId: randomUUID(),
       campaignPackageId: pkg.campaignPackageId,
-      campaignRevision: pkg.currentRevision,
+      campaignRevision: newRevision,
       campaignBriefId: pkg.campaignBriefId,
       reviewerId: input.reviewerId,
       status: input.status,
@@ -141,7 +186,8 @@ export class CampaignReviewService {
         ? { regenerationInstructions: input.regenerationInstructions }
         : {}),
       ...(input.notes ? { notes: input.notes } : {}),
-      previousRevision: pkg.currentRevision,
+      previousRevision,
+      newRevision,
       reviewedAt: new Date(),
     });
 
@@ -149,8 +195,15 @@ export class CampaignReviewService {
       await CampaignFeedbackModel.create({
         feedbackId: randomUUID(),
         campaignPackageId: pkg.campaignPackageId,
-        category: "package_review",
-        originalValue: null,
+        category:
+          input.status === "corrected"
+            ? "message_correction"
+            : input.status === "approved"
+              ? "campaign_approved"
+              : input.status === "rejected"
+                ? "campaign_rejected"
+                : "package_review",
+        originalValue: { revision: previousRevision },
         correctedValue: input.corrections ?? null,
         reason: input.notes ?? null,
         reviewerId: input.reviewerId,
@@ -182,6 +235,8 @@ export class CampaignReviewService {
         event: `ai.campaign.package.${input.status}`,
         campaignPackageId: pkg.campaignPackageId,
         reviewerId: input.reviewerId,
+        previousRevision,
+        newRevision,
       },
       "Campaign package review updated",
     );
@@ -199,8 +254,8 @@ export class CampaignReviewService {
                 : "campaign.package.reviewed",
         targetType: "campaign_package",
         targetId: pkg.campaignPackageId,
-        previousRevision: pkg.currentRevision,
-        newRevision: pkg.currentRevision,
+        previousRevision,
+        newRevision,
         ...(input.notes ? { reason: input.notes } : {}),
         correlationId: pkg.correlationId ?? randomUUID(),
         requestId: randomUUID(),
@@ -210,5 +265,127 @@ export class CampaignReviewService {
     );
 
     return pkg.toObject();
+  }
+
+  /**
+   * Supersede the current package revision and re-enqueue the parent campaign
+   * job so a new immutable attempt/package can be generated.
+   */
+  async regeneratePackage(input: {
+    campaignPackageId: string;
+    reviewerId: string;
+    regenerationInstructions?: string;
+  }) {
+    const pkg = await CampaignPackageModel.findOne({
+      campaignPackageId: input.campaignPackageId,
+    });
+    if (!pkg) {
+      throw new NotFoundException({
+        code: "CAMPAIGN_PACKAGE_NOT_FOUND",
+        message: "Campaign package was not found.",
+      });
+    }
+    if (pkg.status === "superseded") {
+      throw new BadRequestException({
+        code: "CAMPAIGN_REVISION_CONFLICT",
+        message: "Campaign package is already superseded.",
+      });
+    }
+
+    const previousRevision = pkg.currentRevision;
+    pkg.status = "superseded";
+    pkg.supersededAt = new Date();
+    pkg.reviewStatus = "needs_regeneration";
+    pkg.reviewerId = input.reviewerId;
+    await pkg.save();
+
+    await CampaignReviewModel.create({
+      reviewId: randomUUID(),
+      campaignPackageId: pkg.campaignPackageId,
+      campaignRevision: previousRevision,
+      campaignBriefId: pkg.campaignBriefId,
+      reviewerId: input.reviewerId,
+      status: "needs_regeneration",
+      reasonCodes: ["manual_review_requested"],
+      ...(input.regenerationInstructions
+        ? { regenerationInstructions: input.regenerationInstructions }
+        : {}),
+      previousRevision,
+      newRevision: previousRevision + 1,
+      reviewedAt: new Date(),
+    });
+
+    await CampaignFeedbackModel.create({
+      feedbackId: randomUUID(),
+      campaignPackageId: pkg.campaignPackageId,
+      category: "package_review",
+      originalValue: { revision: previousRevision },
+      correctedValue: null,
+      reason: input.regenerationInstructions ?? "regeneration_requested",
+      reviewerId: input.reviewerId,
+    });
+
+    const job = await CampaignJobModel.findOne({ campaignJobId: pkg.campaignJobId });
+    if (!job) {
+      throw new NotFoundException({
+        code: "CAMPAIGN_JOB_NOT_RETRYABLE",
+        message: "Parent campaign job was not found for regeneration.",
+      });
+    }
+
+    job.status = "queued";
+    job.currentStage = "queued";
+    job.campaignPackageId = null;
+    job.errorCode = null;
+    job.safeError = null;
+    job.queuedAt = new Date();
+    job.requiresReview = true;
+    job.reviewReasonCodes = Array.from(
+      new Set<CampaignReviewReasonCode>([
+        ...(job.reviewReasonCodes ?? []),
+        "manual_review_requested",
+      ]),
+    );
+    const bullJob = await this.campaignQueue.enqueueBuildCampaign(
+      {
+        campaignJobId: job.campaignJobId,
+        recommendationSetId: job.recommendationSetId,
+      },
+      { uniqueJobId: true },
+    );
+    job.bullJobId = String(bullJob.id);
+    await job.save();
+
+    this.logger.info(
+      {
+        event: "ai.campaign.regeneration.requested",
+        campaignPackageId: pkg.campaignPackageId,
+        campaignJobId: job.campaignJobId,
+        previousRevision,
+      },
+      "Campaign package regeneration enqueued",
+    );
+
+    await this.auditEvents.record({
+      actorId: input.reviewerId,
+      action: "campaign.package.reviewed",
+      targetType: "campaign_package",
+      targetId: pkg.campaignPackageId,
+      previousRevision,
+      newRevision: previousRevision + 1,
+      reason: "regeneration_requested",
+      correlationId: pkg.correlationId ?? randomUUID(),
+      requestId: randomUUID(),
+      outcome: "success",
+    });
+
+    return {
+      campaignPackageId: pkg.campaignPackageId,
+      status: "superseded",
+      campaignJobId: job.campaignJobId,
+      jobStatus: job.status,
+      previousRevision,
+      queued: true,
+    };
   }
 }

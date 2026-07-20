@@ -20,13 +20,9 @@ import {
   type CreateCampaignJobInput,
 } from "./campaign-job.service.js";
 import { CampaignReviewService } from "./campaign-review.service.js";
+import { BrandProfileService } from "./brand-profile.service.js";
+import { CampaignPolicyService } from "./campaign-policy.service.js";
 import { CampaignBriefModel } from "../models/campaign.schema.js";
-import {
-  BrandProfileModel,
-  CampaignPolicyModel,
-  CompliancePolicyModel,
-  PlatformPolicyModel,
-} from "../models/campaign-policy.schema.js";
 
 @Controller("api/admin/ai")
 @UseGuards(AdminAuthGuard, AiPermissionGuard)
@@ -36,6 +32,10 @@ export class CampaignController {
     private readonly campaignJobService: CampaignJobService,
     @Inject(CampaignReviewService)
     private readonly campaignReviewService: CampaignReviewService,
+    @Inject(BrandProfileService)
+    private readonly brandProfileService: BrandProfileService,
+    @Inject(CampaignPolicyService)
+    private readonly campaignPolicyService: CampaignPolicyService,
   ) {}
 
   @Post("campaigns/jobs")
@@ -80,6 +80,16 @@ export class CampaignController {
   @RequireAiPermission(AI_PERMISSIONS.CAMPAIGNS_CANCEL)
   cancelJob(@Param("campaignJobId") campaignJobId: string) {
     return this.campaignJobService.cancelJob(campaignJobId);
+  }
+
+  @Post("campaigns/briefs")
+  @RequireAiPermission(AI_PERMISSIONS.CAMPAIGN_BRIEFS_CREATE)
+  createBrief() {
+    return {
+      code: "CAMPAIGN_BRIEF_VIA_JOB",
+      message:
+        "Campaign briefs are created by the campaign job worker from an approved recommendation set. Use POST /api/admin/ai/campaigns/jobs.",
+    };
   }
 
   @Get("campaigns/briefs")
@@ -134,6 +144,8 @@ export class CampaignController {
     @Query("status") status?: string,
     @Query("language") language?: string,
     @Query("platform") platform?: string,
+    @Query("objective") objective?: string,
+    @Query("requiresReview") requiresReview?: string,
     @Query("limit") limit?: string,
     @Query("offset") offset?: string,
   ) {
@@ -141,6 +153,8 @@ export class CampaignController {
       status,
       language,
       platform,
+      objective,
+      requiresReview,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
     });
@@ -221,42 +235,122 @@ export class CampaignController {
   @RequireAiPermission(AI_PERMISSIONS.CAMPAIGNS_REGENERATE)
   regenerate(
     @Param("campaignPackageId") campaignPackageId: string,
+    @Body() body: { regenerationInstructions?: string },
     @Req() request: { adminUserId?: string },
   ) {
-    return this.campaignReviewService.review({
+    return this.campaignReviewService.regeneratePackage({
       campaignPackageId,
       reviewerId: request.adminUserId ?? "temporary-admin",
-      status: "needs_regeneration",
+      ...(body?.regenerationInstructions
+        ? { regenerationInstructions: body.regenerationInstructions }
+        : {}),
     });
   }
 
   @Get("brand-profiles")
   @RequireAiPermission(AI_PERMISSIONS.BRAND_PROFILES_READ)
   listBrandProfiles() {
-    return BrandProfileModel.find().sort({ version: -1 }).lean();
+    return this.brandProfileService.listVersions();
   }
 
   @Get("brand-profiles/:brandProfileId")
   @RequireAiPermission(AI_PERMISSIONS.BRAND_PROFILES_READ)
-  getBrandProfile(@Param("brandProfileId") brandProfileId: string) {
-    return BrandProfileModel.find({ brandProfileId }).sort({ version: -1 }).lean();
+  async getBrandProfile(@Param("brandProfileId") brandProfileId: string) {
+    const listed = await this.brandProfileService.listVersions();
+    return {
+      items: listed.items.filter(
+        (item) =>
+          (item as { brandProfileId?: string }).brandProfileId === brandProfileId,
+      ),
+    };
+  }
+
+  @Post("brand-profiles")
+  @RequireAiPermission(AI_PERMISSIONS.BRAND_PROFILES_CREATE)
+  createBrandProfile(
+    @Body()
+    body: {
+      brandName?: string;
+      toneAttributes?: string[];
+      toneRestrictions?: string[];
+      approvedValuePropositions?: string[];
+      approvedCapabilities?: string[];
+      prohibitedClaims?: string[];
+      protectedTerms?: string[];
+    },
+    @Req() request: { adminUserId?: string },
+  ) {
+    return this.brandProfileService.createVersion({
+      ...body,
+      createdBy: request.adminUserId ?? "temporary-admin",
+    });
+  }
+
+  @Post("brand-profiles/:brandProfileId/activate")
+  @RequireAiPermission(AI_PERMISSIONS.BRAND_PROFILES_PUBLISH)
+  async activateBrandProfile(
+    @Param("brandProfileId") brandProfileId: string,
+    @Req() request: { adminUserId?: string },
+  ) {
+    const listed = await this.brandProfileService.listVersions();
+    const match = listed.items.find(
+      (item) =>
+        (item as { brandProfileId?: string }).brandProfileId === brandProfileId,
+    ) as { version?: number } | undefined;
+    if (!match?.version) {
+      return this.brandProfileService.getActive();
+    }
+    return this.brandProfileService.publishVersion(
+      match.version,
+      request.adminUserId ?? "temporary-admin",
+    );
   }
 
   @Get("campaign-policies")
   @RequireAiPermission(AI_PERMISSIONS.CAMPAIGN_POLICIES_READ)
   campaignPolicies() {
-    return CampaignPolicyModel.find().sort({ version: -1 }).lean();
+    return this.campaignPolicyService.listCampaignPolicies();
+  }
+
+  @Post("campaign-policies/:version/publish")
+  @RequireAiPermission(AI_PERMISSIONS.CAMPAIGN_POLICIES_PUBLISH)
+  publishCampaignPolicy(@Param("version") version: string) {
+    return this.campaignPolicyService.publishCampaignPolicy(Number(version));
   }
 
   @Get("platform-policies")
   @RequireAiPermission(AI_PERMISSIONS.PLATFORM_POLICIES_READ)
   platformPolicies() {
-    return PlatformPolicyModel.find().sort({ version: -1 }).lean();
+    return this.campaignPolicyService.listPlatformPolicies();
+  }
+
+  @Post("platform-policies/:version/publish")
+  @RequireAiPermission(AI_PERMISSIONS.PLATFORM_POLICIES_PUBLISH)
+  publishPlatformPolicy(@Param("version") version: string) {
+    return this.campaignPolicyService.publishPlatformPolicy(Number(version));
   }
 
   @Get("compliance-policies")
   @RequireAiPermission(AI_PERMISSIONS.COMPLIANCE_POLICIES_READ)
   compliancePolicies() {
-    return CompliancePolicyModel.find().sort({ version: -1 }).lean();
+    return this.campaignPolicyService.listCompliancePolicies();
+  }
+
+  @Post("compliance-policies/:version/publish")
+  @RequireAiPermission(AI_PERMISSIONS.COMPLIANCE_POLICIES_PUBLISH)
+  publishCompliancePolicy(@Param("version") version: string) {
+    return this.campaignPolicyService.publishCompliancePolicy(Number(version));
+  }
+
+  @Get("translation-glossaries")
+  @RequireAiPermission(AI_PERMISSIONS.TRANSLATION_GLOSSARIES_READ)
+  translationGlossaries() {
+    return this.campaignPolicyService.listGlossaries();
+  }
+
+  @Post("translation-glossaries/:version/publish")
+  @RequireAiPermission(AI_PERMISSIONS.TRANSLATION_GLOSSARIES_PUBLISH)
+  publishGlossary(@Param("version") version: string) {
+    return this.campaignPolicyService.publishGlossary(Number(version));
   }
 }

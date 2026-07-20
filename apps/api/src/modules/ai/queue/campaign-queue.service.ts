@@ -33,11 +33,17 @@ export class CampaignQueueService implements OnModuleDestroy {
     });
   }
 
-  async enqueueBuildCampaign(payload: GenerateCampaignJobPayload) {
+  async enqueueBuildCampaign(
+    payload: GenerateCampaignJobPayload,
+    options?: { uniqueJobId?: boolean },
+  ) {
+    const jobId = options?.uniqueJobId
+      ? `campaign:${payload.campaignJobId}:${Date.now()}`
+      : `campaign:${payload.campaignJobId}`;
     return this.campaignQueue.add(
       AI_CAMPAIGN_JOB_NAMES.BUILD_CAMPAIGN_BRIEF,
       payload,
-      { jobId: `campaign:${payload.campaignJobId}` },
+      { jobId },
     );
   }
 

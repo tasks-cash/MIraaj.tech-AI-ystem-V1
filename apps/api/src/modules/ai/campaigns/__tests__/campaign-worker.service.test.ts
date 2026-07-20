@@ -189,6 +189,7 @@ async function loadWorker(input: {
   aiClientOverride?: {
     postCampaignStrategy: () => Promise<Record<string, unknown>>;
     postCampaignGenerate: () => Promise<Record<string, unknown>>;
+    postCampaignTranscreate?: () => Promise<Record<string, unknown>>;
   };
 }) {
   vi.resetModules();
@@ -219,7 +220,7 @@ async function loadWorker(input: {
   const eligibility = {
     loadAndValidate: () => Promise.resolve(input.source ?? approvedSource),
   };
-  const aiClientCalls = { strategy: 0, generate: 0 };
+  const aiClientCalls = { strategy: 0, generate: 0, transcreate: 0 };
   const aiClient = {
     postCampaignStrategy: () => {
       aiClientCalls.strategy += 1;
@@ -228,6 +229,27 @@ async function loadWorker(input: {
     postCampaignGenerate: () => {
       aiClientCalls.generate += 1;
       return input.aiClientOverride?.postCampaignGenerate() ?? Promise.resolve({});
+    },
+    postCampaignTranscreate: () => {
+      aiClientCalls.transcreate += 1;
+      return (
+        input.aiClientOverride?.postCampaignTranscreate?.() ??
+        Promise.resolve({
+          accepted: true,
+          data: {
+            provider: "stub",
+            model: "stub",
+            semanticPreservationScore: 0.96,
+            requiresReview: false,
+            reviewReasonCodes: [],
+            variant: {
+              primaryText: "[fr] Miraaj.tech practical systems for consultation.",
+              language: "fr",
+              locale: "fr",
+            },
+          },
+        })
+      );
     },
   };
   const queueService = { moveToDeadLetter: vi.fn() };
@@ -340,7 +362,7 @@ describe("Prompt 4 — CampaignWorkerService pipeline", () => {
     expect(variants[0]?.disclosureText).toBeTruthy();
   });
 
-  it("Scenario I — missing destination reference downgrades every platform CTA to no_direct_cta", async () => {
+  it("Scenario N — missing destination reference downgrades every platform CTA to no_direct_cta", async () => {
     const job = makeJobRecord({ destinationReference: null });
     const { worker, packageCollector } = await loadWorker({ job });
 
@@ -351,5 +373,195 @@ describe("Prompt 4 — CampaignWorkerService pipeline", () => {
     const pkg = packageCollector.items[0] as Record<string, unknown>;
     const variants = pkg.platformVariants as Array<Record<string, unknown>>;
     expect(variants[0]?.ctaCode).toBe("no_direct_cta");
+  });
+
+  it("Scenario A — dental professional package generates platforms, briefs, and regulated review", async () => {
+    const job = makeJobRecord({
+      selectedPlatforms: ["facebook", "instagram", "linkedin"],
+      selectedServiceIds: [
+        "dental_clinic_management",
+        "clinic_website",
+        "medical_appointment_booking",
+      ],
+      targetLanguages: ["ar", "fr"],
+      targetLocales: ["ar", "fr"],
+      baseLanguage: "ar",
+      sourceLocale: "ar",
+      translationProviderPreference: "disabled",
+    });
+    const { worker, packageCollector } = await loadWorker({ job });
+
+    await (worker as unknown as { process(job: unknown): Promise<void> }).process({
+      data: { campaignJobId: job.campaignJobId, recommendationSetId: job.recommendationSetId },
+    });
+
+    const pkg = packageCollector.items[0] as Record<string, unknown>;
+    expect(pkg.status).toBe("awaiting_review");
+    expect(pkg.reviewReasonCodes).toContain("regulated_domain");
+    expect((pkg.platformVariants as unknown[]).length).toBe(3);
+    expect((pkg.imageCreativeBriefs as unknown[]).length).toBeGreaterThan(0);
+    expect((pkg.carouselBriefs as unknown[]).length).toBeGreaterThan(0);
+    expect((pkg.storySequences as unknown[]).length).toBeGreaterThan(0);
+    const languageVariants = pkg.languageVariants as Array<Record<string, unknown>>;
+    expect(languageVariants.some((v) => v.language === "fr")).toBe(true);
+  });
+
+  it("Scenario C — restaurant owner package includes social platforms without fake testimonials", async () => {
+    const restaurantSource = {
+      ...approvedSource,
+      businessProfile: {
+        ...approvedSource.businessProfile,
+        businessType: { code: "restaurant" },
+        audienceType: { code: "owner" },
+        decisionMakerConfidence: 0.9,
+      },
+      selectedServices: [
+        { itemSlug: "restaurant_management_system", state: "recommended", isPaymentService: false },
+      ],
+    };
+    const job = makeJobRecord({
+      selectedPlatforms: ["facebook", "instagram", "tiktok"],
+      selectedServiceIds: ["restaurant_management_system"],
+    });
+    const { worker, packageCollector } = await loadWorker({
+      job,
+      source: restaurantSource,
+    });
+
+    await (worker as unknown as { process(job: unknown): Promise<void> }).process({
+      data: { campaignJobId: job.campaignJobId, recommendationSetId: job.recommendationSetId },
+    });
+
+    const pkg = packageCollector.items[0] as Record<string, unknown>;
+    const primaryTexts = (
+      (pkg.platformVariants as Array<Record<string, unknown>>) ?? []
+    )
+      .map((variant) => {
+        const text = variant.primaryText;
+        return (typeof text === "string" ? text : "").toLowerCase();
+      })
+      .join(" ");
+    expect(pkg.selectedPlatforms).toEqual(["facebook", "instagram", "tiktok"]);
+    expect(primaryTexts).not.toContain("increase revenue by");
+    expect(primaryTexts).not.toContain("our customers increase");
+    expect((pkg.videoCreativeBriefs as unknown[]).length).toBeGreaterThan(0);
+    expect(
+      (pkg.videoCreativeBriefs as Array<Record<string, unknown>>)[0]
+        ?.prohibitedElements,
+    ).toContain("fake testimonials");
+  });
+
+  it("Scenario E — school manager package requires education/regulated review", async () => {
+    const schoolSource = {
+      ...approvedSource,
+      businessProfile: {
+        ...approvedSource.businessProfile,
+        businessType: { code: "school" },
+        audienceType: { code: "manager" },
+        decisionMakerConfidence: 0.88,
+      },
+      selectedServices: [
+        { itemSlug: "school_management_system", state: "recommended", isPaymentService: false },
+      ],
+    };
+    const job = makeJobRecord({
+      selectedServiceIds: ["school_management_system"],
+      selectedPlatforms: ["facebook", "linkedin"],
+    });
+    const { worker, packageCollector } = await loadWorker({ job, source: schoolSource });
+
+    await (worker as unknown as { process(job: unknown): Promise<void> }).process({
+      data: { campaignJobId: job.campaignJobId, recommendationSetId: job.recommendationSetId },
+    });
+
+    const pkg = packageCollector.items[0] as Record<string, unknown>;
+    expect(pkg.reviewReasonCodes).toContain("regulated_domain");
+    expect(pkg.status).toBe("awaiting_review");
+  });
+
+  it("Scenario H — small business foundation keeps phased consultation messaging", async () => {
+    const smallBiz = {
+      ...approvedSource,
+      businessProfile: {
+        ...approvedSource.businessProfile,
+        businessType: { code: "retail" },
+        audienceType: { code: "owner" },
+        decisionMakerConfidence: 0.8,
+      },
+      selectedServices: [
+        { itemSlug: "corporate_website", state: "recommended", isPaymentService: false },
+        { itemSlug: "backup_strategy", state: "recommended", isPaymentService: false },
+      ],
+    };
+    const job = makeJobRecord({
+      objective: "consultation_request",
+      funnelStage: "awareness",
+      selectedServiceIds: ["corporate_website", "backup_strategy"],
+      selectedPlatforms: ["facebook", "email"],
+    });
+    const { worker, packageCollector } = await loadWorker({ job, source: smallBiz });
+
+    await (worker as unknown as { process(job: unknown): Promise<void> }).process({
+      data: { campaignJobId: job.campaignJobId, recommendationSetId: job.recommendationSetId },
+    });
+
+    const pkg = packageCollector.items[0] as Record<string, unknown>;
+    const text = JSON.stringify(pkg).toLowerCase();
+    expect(text).toContain("consultation");
+    expect(text).not.toContain("fake urgency");
+  });
+
+  it("Scenario I — multi-branch enterprise prefers professional platforms", async () => {
+    const enterprise = {
+      ...approvedSource,
+      businessProfile: {
+        ...approvedSource.businessProfile,
+        businessType: { code: "multi_branch_business" },
+        audienceType: { code: "executive" },
+        decisionMakerConfidence: 0.93,
+      },
+      selectedServices: [
+        { itemSlug: "multi_branch_platform", state: "recommended", isPaymentService: false },
+        { itemSlug: "role_based_access_control", state: "recommended", isPaymentService: false },
+      ],
+    };
+    const job = makeJobRecord({
+      selectedPlatforms: ["linkedin", "facebook"],
+      selectedServiceIds: ["multi_branch_platform", "role_based_access_control"],
+    });
+    const { worker, packageCollector } = await loadWorker({ job, source: enterprise });
+
+    await (worker as unknown as { process(job: unknown): Promise<void> }).process({
+      data: { campaignJobId: job.campaignJobId, recommendationSetId: job.recommendationSetId },
+    });
+
+    const pkg = packageCollector.items[0] as Record<string, unknown>;
+    expect(pkg.selectedPlatforms).toEqual(["linkedin", "facebook"]);
+    expect((pkg.platformVariants as unknown[]).length).toBe(2);
+  });
+
+  it("Scenario J — multilingual transcreation calls the AI client when translation is enabled", async () => {
+    const job = makeJobRecord({
+      providerPreference: "disabled",
+      translationProviderPreference: "gemini",
+      targetLanguages: ["en", "fr"],
+      targetLocales: ["en", "fr"],
+      baseLanguage: "en",
+      sourceLocale: "en",
+    });
+    const { worker, packageCollector, aiClientCalls } = await loadWorker({ job });
+
+    await (worker as unknown as { process(job: unknown): Promise<void> }).process({
+      data: { campaignJobId: job.campaignJobId, recommendationSetId: job.recommendationSetId },
+    });
+
+    expect(aiClientCalls.transcreate).toBeGreaterThanOrEqual(1);
+    const pkg = packageCollector.items[0] as Record<string, unknown>;
+    const languageVariants = pkg.languageVariants as Array<Record<string, unknown>>;
+    const french = languageVariants.find((variant) => variant.language === "fr");
+    expect(french?.strategy).toBe("transcreation");
+    const frenchText =
+      typeof french?.transcreatedText === "string" ? french.transcreatedText : "";
+    expect(frenchText).toContain("Miraaj.tech");
   });
 });
