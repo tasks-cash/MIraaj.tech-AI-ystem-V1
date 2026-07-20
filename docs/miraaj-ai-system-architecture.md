@@ -846,3 +846,73 @@ routes. Permissions: `ai.campaigns.*`, `ai.campaignBriefs.*`,
 Social OAuth/publishing, ad accounts, tracked links/UTM beyond placeholders, QR,
 Tasks.cash, landing pages, lead capture, billing, speech/TTS, image/video
 rendering, media editing, campaign analytics ingestion, public campaign UI.
+
+## 29. Full-system observability and immutable audit logs
+
+Prompt 1–4 share one observability layer. Diagnostic logs and immutable audit
+events are related but distinct.
+
+### 29.1 Shared log envelope
+
+Every structured event uses:
+
+`timestamp`, `level`, `event`, `service`, `module`, `environment`,
+`requestId`, `correlationId`, `traceId`, `spanId`, `actorId`, `actorRole`,
+`mediaId`, `analysisJobId`, `intelligenceJobId`, `campaignJobId`,
+`attemptId`, `durationMs`, `outcome`, `safeErrorCode`, `metadata`.
+
+Contracts live in `packages/shared-logging` (`buildStructuredLog`,
+`withTraceContext`, redaction/truncation helpers). FastAPI mirrors the envelope
+in `apps/ai-service/app/core/observability.py`.
+
+### 29.2 Sinks and exporters
+
+- Console JSON (production-friendly local/container stdout)
+- In-memory sink for automated tests
+- OpenTelemetry-compatible exporter abstraction (local/in-memory by default)
+- Future external centralized logging provider adapter
+
+No paid logging service is required. Production may attach an OTLP or vendor
+sink later without changing event shape.
+
+### 29.3 Redaction and truncation
+
+Always redact authorization headers, cookies, provider keys, HMAC secrets, and
+presigned URLs. Truncate OCR text, campaign content, prompts, and other bulky
+fields in ordinary diagnostic logs. Never log raw provider responses, full
+campaign packages, passwords, or tokens.
+
+### 29.4 Audit versus diagnostic logs
+
+Diagnostic logs support operations and incident investigation. Immutable audit
+events record consequential administrator actions (auth failure, permission
+denial, media/analysis/recommendation/campaign review outcomes, brand/policy
+activation, compliance overrides, regulated/payment approvals). Audit documents
+store hashed IP and truncated user-agent summaries only.
+
+Protected query API:
+
+- `GET /api/admin/ai/audit-events`
+- `GET /api/admin/ai/audit-events/:auditEventId`
+
+Permission: `ai.auditLogs.read`. No public log endpoints.
+
+### 29.5 Fail-closed audit writes
+
+Consequential actions (campaign approval, policy/catalog activation, compliance
+override, regulated-domain approval) fail closed when the audit write fails.
+Low-risk diagnostic log failures must not crash ordinary requests or expose
+secrets.
+
+### 29.6 Retention and rotation
+
+Document retention for briefs, attempts, packages, reviews, feedback, BullMQ
+job metadata, and audit references in ops runbooks. Rotate container/file logs
+at the platform layer. Do not auto-delete approved campaign packages. Raw
+provider response retention remains off by default.
+
+### 29.7 Status
+
+Protected system status reports logging subsystem state, last successful log
+emission, audit persistence state, dropped/failed write counters, and
+trace/metrics exporter state.

@@ -1,5 +1,12 @@
 export type LogLevel = "debug" | "info" | "warn" | "error" | "fatal";
-export type LogOutcome = "success" | "failure" | "partial";
+export type LogOutcome =
+  | "success"
+  | "failure"
+  | "partial"
+  | "denied"
+  | "timeout"
+  | "cancelled"
+  | "skipped";
 
 export interface StructuredLogEnvelope {
   timestamp: string;
@@ -25,6 +32,56 @@ export interface StructuredLogEnvelope {
   metadata?: Record<string, unknown>;
 }
 
+export interface LogSink {
+  readonly sinkId: string;
+  emit(event: StructuredLogEnvelope): Promise<void> | void;
+}
+
+/** Local/dev console sink that always emits JSON lines. */
+export class ConsoleJsonLogSink implements LogSink {
+  readonly sinkId = "console-json";
+  emit(event: StructuredLogEnvelope): void {
+    console.log(JSON.stringify(event));
+  }
+}
+
+/** Test-only sink used by automated suites. */
+export class InMemoryLogSink implements LogSink {
+  readonly sinkId = "in-memory";
+  readonly events: StructuredLogEnvelope[] = [];
+  emit(event: StructuredLogEnvelope): void {
+    this.events.push(event);
+  }
+}
+
+/**
+ * OpenTelemetry-compatible exporter abstraction.
+ * Automated tests and local default use the in-memory path; production may
+ * swap in a real OTLP exporter without changing call sites.
+ */
+export class OpenTelemetryCompatibleLogSink implements LogSink {
+  readonly sinkId = "otel-compatible";
+  private readonly delegate: LogSink;
+  constructor(delegate: LogSink = new InMemoryLogSink()) {
+    this.delegate = delegate;
+  }
+  emit(event: StructuredLogEnvelope): Promise<void> | void {
+    return this.delegate.emit(event);
+  }
+}
+
+/** Future centralized logging provider adapter (no paid sink required). */
+export class ExternalLoggingProviderSink implements LogSink {
+  readonly sinkId = "external-provider";
+  private readonly delegate: LogSink;
+  constructor(delegate: LogSink = new InMemoryLogSink()) {
+    this.delegate = delegate;
+  }
+  emit(event: StructuredLogEnvelope): Promise<void> | void {
+    return this.delegate.emit(event);
+  }
+}
+
 const PRESIGNED_URL_PATTERN =
   /https?:\/\/[^\s"'<>]+(?:X-Amz-Signature|X-Amz-Credential|X-Amz-Algorithm)[^\s"'<>]*/gi;
 const AUTHORIZATION_PATTERN = /(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi;
@@ -48,6 +105,20 @@ export function redactSensitiveText(value: string): string {
     .replace(AUTHORIZATION_PATTERN, "[REDACTED_AUTHORIZATION]");
 }
 
+const CONTENT_METADATA_KEYS = [
+  "ocr",
+  "campaign",
+  "content",
+  "prompt",
+  "providerresponse",
+  "rawtext",
+] as const;
+
+function shouldTruncateMetadataKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[_-]/g, "");
+  return CONTENT_METADATA_KEYS.some((fragment) => normalized.includes(fragment));
+}
+
 export function buildStructuredLog(
   input: Omit<StructuredLogEnvelope, "timestamp"> & {
     timestamp?: string;
@@ -59,7 +130,13 @@ export function buildStructuredLog(
       : Object.fromEntries(
           Object.entries(input.metadata).map(([key, value]) => {
             if (typeof value === "string") {
-              return [key, redactSensitiveText(value)];
+              const redacted = redactSensitiveText(value);
+              return [
+                key,
+                shouldTruncateMetadataKey(key)
+                  ? (truncateForLog(redacted, 240) ?? redacted)
+                  : redacted,
+              ];
             }
             return [key, value];
           }),
