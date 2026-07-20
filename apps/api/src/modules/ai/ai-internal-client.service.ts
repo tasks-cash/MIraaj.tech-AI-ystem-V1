@@ -22,6 +22,13 @@ import type {
   ProvidersStatusResponse,
   SignedMediaRequestBody,
 } from "./types/ai-media-responses.js";
+import type {
+  BusinessProfileReasoningRequestBody,
+  BusinessProfileReasoningResponse,
+  ContradictionCheckResponse,
+  IntelligenceProvidersStatusResponse,
+  NeedsSuggestionResponse,
+} from "./types/ai-intelligence-responses.js";
 
 @Injectable()
 export class AiInternalClientService {
@@ -106,6 +113,64 @@ export class AiInternalClientService {
     return this.requestJson<ProvidersStatusResponse>({
       method: "GET",
       path: "/internal/v1/providers/status",
+      ...input,
+    });
+  }
+
+  /**
+   * Optional reasoning provider. Its output is advisory evidence only —
+   * NestJS's deterministic BusinessProfileService always makes the final
+   * decision on business type, audience, and services.
+   */
+  async postBusinessProfile(
+    body: BusinessProfileReasoningRequestBody,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<BusinessProfileReasoningResponse> {
+    return this.requestJson<BusinessProfileReasoningResponse>({
+      method: "POST",
+      path: "/internal/v1/intelligence/business-profile",
+      body,
+      timeoutMs: loadEnvironment().AI_REASONING_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `intelligence-profile-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async postNeeds(
+    body: BusinessProfileReasoningRequestBody,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<NeedsSuggestionResponse> {
+    return this.requestJson<NeedsSuggestionResponse>({
+      method: "POST",
+      path: "/internal/v1/intelligence/needs",
+      body,
+      timeoutMs: loadEnvironment().AI_REASONING_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `intelligence-needs-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async postContradictions(
+    body: BusinessProfileReasoningRequestBody,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<ContradictionCheckResponse> {
+    return this.requestJson<ContradictionCheckResponse>({
+      method: "POST",
+      path: "/internal/v1/intelligence/contradictions",
+      body,
+      timeoutMs: loadEnvironment().AI_REASONING_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `intelligence-contradictions-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async getIntelligenceProvidersStatus(input?: {
+    requestId?: string;
+    correlationId?: string;
+  }): Promise<IntelligenceProvidersStatusResponse> {
+    return this.requestJson<IntelligenceProvidersStatusResponse>({
+      method: "GET",
+      path: "/internal/v1/intelligence/providers/status",
       ...input,
     });
   }

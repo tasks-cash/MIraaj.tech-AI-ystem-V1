@@ -156,6 +156,23 @@ describe("AI health service", () => {
           }),
       } as never,
       {
+        getQueueStats: () =>
+          Promise.resolve({
+            intelligence: {
+              waiting: 0,
+              active: 0,
+              completed: 0,
+              failed: 0,
+              delayed: 0,
+            },
+            deadLetter: { waiting: 0, active: 0, completed: 0, failed: 0 },
+          }),
+        deadLetterQueue: {
+          getFailedCount: () => Promise.resolve(0),
+          getWaitingCount: () => Promise.resolve(0),
+        },
+      } as never,
+      {
         reconcileStaleJobs: () => Promise.resolve(0),
       } as never,
     );

@@ -40,6 +40,10 @@ timestamp, request/correlation IDs, idempotency key, body SHA-256, signature).
 | POST | `/internal/v1/media/analyze` |
 | GET | `/internal/v1/providers/status` |
 | GET | `/internal/v1/ocr/status` |
+| POST | `/internal/v1/intelligence/business-profile` |
+| POST | `/internal/v1/intelligence/needs` |
+| POST | `/internal/v1/intelligence/contradictions` |
+| GET | `/internal/v1/intelligence/providers/status` |
 
 Media bytes are fetched from short-lived signed object URLs only. Hosts must be
 listed in `MEDIA_FETCH_ALLOWED_HOSTS`. Redirects and arbitrary URLs are rejected.
@@ -56,6 +60,29 @@ Key env vars: `OCR_LANGUAGES_DEFAULT`, `OCR_LANGUAGES_INSTALLED`,
 `VISION_PROVIDER_ENABLED=false` by default. When enabled, `GEMINI_API_KEY` must
 exist only in this service runtime. Invalid provider JSON is schema-validated
 and may get one bounded repair retry.
+
+## Business reasoning (Prompt 3)
+
+`app/api/internal_intelligence.py` classifies the Prompt-2-style
+`businessSignals` / `audienceSignals` / OCR summary into ranked business and
+audience types, decision-maker likelihood, promotion eligibility,
+needs/pain points/objectives, contradictions, and regulated-domain flags.
+
+- `AI_REASONING_PROVIDER=disabled` (default): a deterministic, local
+  rule-based classifier. Never calls an LLM and never reads free text
+  (`ocrSummary`, `additionalContext`) for decision-making — only structured
+  `code`/`confidence` signals drive classification. Free text is scanned only
+  for prompt-injection phrasing (EN/AR/FR) to raise a review flag.
+- `AI_REASONING_PROVIDER=gemini`: reuses `GEMINI_API_KEY`. Requests wrap
+  untrusted source content in explicit delimiters and instruct the model to
+  never follow instructions found inside them, never infer sensitive traits,
+  and never perform face recognition or identity claims. Responses are
+  schema-validated with one bounded JSON-repair retry, same pattern as the
+  vision provider.
+
+This module never connects to MongoDB, never exposes a public route, and
+never generates campaigns — it only returns reasoning signals for other
+internal services to act on.
 
 ## Tests
 

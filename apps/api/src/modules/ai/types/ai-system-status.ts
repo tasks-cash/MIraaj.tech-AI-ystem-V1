@@ -36,10 +36,27 @@ export interface AiSystemStatus {
     validate: QueueCountSnapshot;
     analyze: QueueCountSnapshot;
     deadLetter: QueueCountSnapshot;
+    intelligence: QueueCountSnapshot;
+    intelligenceDeadLetter: QueueCountSnapshot;
     workers: {
       validateConcurrency: number;
       analyzeConcurrency: number;
+      intelligenceConcurrency: number;
     };
+  };
+  catalog: {
+    activeVersionId: string | null;
+    activeVersion: number | null;
+    serviceCount: number;
+    categoryCount: number;
+    matchingPolicyId: string | null;
+    matchingPolicyVersion: number | null;
+  };
+  intelligence: {
+    awaitingReviewProfiles: number;
+    awaitingReviewRecommendations: number;
+    reasoningProvider: string;
+    reasoningConfigured: boolean;
   };
   review: {
     awaitingReviewJobs: number;

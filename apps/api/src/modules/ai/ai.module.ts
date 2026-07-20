@@ -17,14 +17,34 @@ import { UploadSessionService } from "./media/upload-session.service.js";
 import { MediaQueueModule } from "./queue/media-queue.module.js";
 import { MediaWorkerService } from "./queue/media-worker.service.js";
 import { StaleJobService } from "./queue/stale-job.service.js";
+import { CatalogSeedService } from "./catalog/catalog-seed.service.js";
+import { CatalogService } from "./catalog/catalog.service.js";
+import { CatalogController } from "./catalog/catalog.controller.js";
+import { MatchingEngineService } from "./matching/matching-engine.service.js";
+import { PhasePlannerService } from "./matching/phase-planner.service.js";
+import { BundleBuilderService } from "./matching/bundle-builder.service.js";
+import { BusinessProfileService } from "./intelligence/business-profile.service.js";
+import { IntelligenceJobService } from "./intelligence/intelligence-job.service.js";
+import { RecommendationService } from "./intelligence/recommendation.service.js";
+import { IntelligenceReviewService } from "./intelligence/intelligence-review.service.js";
+import { IntelligencePromptSeedService } from "./intelligence/intelligence-prompt-seed.service.js";
+import { IntelligenceController } from "./intelligence/intelligence.controller.js";
+import { BusinessProfileController } from "./intelligence/business-profile.controller.js";
+import { RecommendationController } from "./intelligence/recommendation.controller.js";
+import { IntelligenceQueueModule } from "./queue/intelligence-queue.module.js";
+import { IntelligenceWorkerService } from "./queue/intelligence-worker.service.js";
 
 @Module({
-  imports: [MediaQueueModule],
+  imports: [MediaQueueModule, IntelligenceQueueModule],
   controllers: [
     AiController,
     UploadSessionController,
     MediaController,
     AnalysisController,
+    CatalogController,
+    IntelligenceController,
+    BusinessProfileController,
+    RecommendationController,
   ],
   providers: [
     AiService,
@@ -40,7 +60,25 @@ import { StaleJobService } from "./queue/stale-job.service.js";
     PromptSeedService,
     MediaWorkerService,
     StaleJobService,
+    CatalogSeedService,
+    CatalogService,
+    MatchingEngineService,
+    PhasePlannerService,
+    BundleBuilderService,
+    BusinessProfileService,
+    IntelligenceJobService,
+    RecommendationService,
+    IntelligenceReviewService,
+    IntelligencePromptSeedService,
+    IntelligenceWorkerService,
   ],
-  exports: [AiService, AiHealthService, AiInternalClientService, MediaQueueModule],
+  exports: [
+    AiService,
+    AiHealthService,
+    AiInternalClientService,
+    MediaQueueModule,
+    IntelligenceQueueModule,
+    CatalogService,
+  ],
 })
 export class AiModule {}

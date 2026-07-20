@@ -30,6 +30,27 @@ export const AI_PERMISSIONS = {
   ANALYSIS_REJECT: "ai.analysis.reject",
   PROMPTS_READ: "ai.prompts.read",
   PROMPTS_MANAGE: "ai.prompts.manage",
+  INTELLIGENCE_CREATE: "ai.intelligence.create",
+  INTELLIGENCE_READ: "ai.intelligence.read",
+  INTELLIGENCE_RETRY: "ai.intelligence.retry",
+  INTELLIGENCE_CANCEL: "ai.intelligence.cancel",
+  BUSINESS_PROFILES_READ: "ai.businessProfiles.read",
+  BUSINESS_PROFILES_REVIEW: "ai.businessProfiles.review",
+  BUSINESS_PROFILES_APPROVE: "ai.businessProfiles.approve",
+  BUSINESS_PROFILES_REJECT: "ai.businessProfiles.reject",
+  RECOMMENDATIONS_READ: "ai.recommendations.read",
+  RECOMMENDATIONS_RECOMPUTE: "ai.recommendations.recompute",
+  RECOMMENDATIONS_REVIEW: "ai.recommendations.review",
+  RECOMMENDATIONS_APPROVE: "ai.recommendations.approve",
+  RECOMMENDATIONS_REJECT: "ai.recommendations.reject",
+  SERVICE_CATALOG_READ: "ai.serviceCatalog.read",
+  SERVICE_CATALOG_CREATE: "ai.serviceCatalog.create",
+  SERVICE_CATALOG_UPDATE: "ai.serviceCatalog.update",
+  SERVICE_CATALOG_PUBLISH: "ai.serviceCatalog.publish",
+  SERVICE_CATALOG_DEPRECATE: "ai.serviceCatalog.deprecate",
+  MATCHING_POLICIES_READ: "ai.matchingPolicies.read",
+  MATCHING_POLICIES_MANAGE: "ai.matchingPolicies.manage",
+  MATCHING_POLICIES_PUBLISH: "ai.matchingPolicies.publish",
 } as const;
 
 export const ALL_TEMPORARY_ADMIN_PERMISSIONS = Object.values(AI_PERMISSIONS);
@@ -113,6 +134,48 @@ export const apiEnvironmentSchema = serverEnvironmentSchema
       .min(1)
       .default("miraaj.ai.media.dead-letter"),
     VISION_PROVIDER_ENABLED: environmentBoolean.default(false),
+    AI_INTELLIGENCE_QUEUE_NAME: z
+      .string()
+      .min(1)
+      .default("miraaj.ai.intelligence"),
+    AI_INTELLIGENCE_DLQ_NAME: z
+      .string()
+      .min(1)
+      .default("miraaj.ai.intelligence.dead-letter"),
+    AI_INTELLIGENCE_WORKER_CONCURRENCY: positiveInt(1, 16).default(2),
+    AI_INTELLIGENCE_MAX_RETRIES: positiveInt(0, 10).default(3),
+    AI_INTELLIGENCE_TIMEOUT_SECONDS: positiveInt(10, 600).default(120),
+    AI_INTELLIGENCE_STALE_SECONDS: positiveInt(30, 3_600).default(300),
+    AI_INTELLIGENCE_RECONCILE_INTERVAL_SECONDS: positiveInt(15, 3_600).default(
+      60,
+    ),
+    AI_REASONING_PROVIDER: z
+      .enum(["disabled", "gemini"])
+      .default("disabled"),
+    AI_REASONING_MODEL: z.string().default(""),
+    AI_REASONING_TIMEOUT_SECONDS: positiveInt(5, 300).default(60),
+    AI_REASONING_MAX_RETRIES: positiveInt(0, 5).default(2),
+    AI_REASONING_MAX_INPUT_CHARS: positiveInt(1_000, 100_000).default(30_000),
+    SERVICE_MATCH_AUTO_APPROVE_MIN: z.coerce
+      .number()
+      .min(0.5)
+      .max(1)
+      .default(0.85),
+    SERVICE_MATCH_REVIEW_MIN: z.coerce.number().min(0).max(1).default(0.55),
+    SERVICE_MATCH_PRIMARY_LIMIT: positiveInt(1, 50).default(10),
+    SERVICE_MATCH_SUPPORTING_LIMIT: positiveInt(1, 50).default(15),
+    SERVICE_MATCH_OPTIONAL_LIMIT: positiveInt(1, 50).default(10),
+    SERVICE_MATCH_FUTURE_LIMIT: positiveInt(1, 50).default(10),
+    SERVICE_MATCH_DECISION_MAKER_MIN: z.coerce
+      .number()
+      .min(0)
+      .max(1)
+      .default(0.65),
+    SERVICE_MATCH_PROFESSIONAL_CONTEXT_MIN: z.coerce
+      .number()
+      .min(0)
+      .max(1)
+      .default(0.65),
   })
   .superRefine((environment, context) => {
     if (
@@ -132,6 +195,16 @@ export const apiEnvironmentSchema = serverEnvironmentSchema
         code: "custom",
         path: ["CONFIDENCE_REVIEW_MIN"],
         message: "CONFIDENCE_REVIEW_MIN must be <= CONFIDENCE_AUTO_COMPLETE_MIN",
+      });
+    }
+    if (
+      environment.SERVICE_MATCH_REVIEW_MIN > environment.SERVICE_MATCH_AUTO_APPROVE_MIN
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["SERVICE_MATCH_REVIEW_MIN"],
+        message:
+          "SERVICE_MATCH_REVIEW_MIN must be <= SERVICE_MATCH_AUTO_APPROVE_MIN",
       });
     }
   });

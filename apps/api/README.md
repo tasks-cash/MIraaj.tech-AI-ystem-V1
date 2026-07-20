@@ -42,8 +42,46 @@ permissions.
 - `miraaj.ai.media.validate`
 - `miraaj.ai.media.analyze`
 - `miraaj.ai.media.dead-letter`
+- `miraaj.ai.intelligence`
+- `miraaj.ai.intelligence.dead-letter`
 
-Workers run in-process with `MEDIA_WORKER_CONCURRENCY` and stale-job recovery.
+Workers run in-process with `MEDIA_WORKER_CONCURRENCY` /
+`AI_INTELLIGENCE_WORKER_CONCURRENCY` and stale-job recovery for both media and
+intelligence jobs.
+
+## Prompt 3 admin endpoints
+
+Business intelligence and Miraaj.tech service matching (no campaign generation).
+
+| Method | Path |
+| --- | --- |
+| POST | `/api/admin/ai/intelligence/jobs` |
+| GET | `/api/admin/ai/intelligence/jobs` |
+| GET | `/api/admin/ai/intelligence/jobs/:jobId` |
+| POST | `/api/admin/ai/intelligence/jobs/:jobId/retry` |
+| POST | `/api/admin/ai/intelligence/jobs/:jobId/cancel` |
+| GET | `/api/admin/ai/business-profiles` |
+| GET | `/api/admin/ai/business-profiles/:profileId` |
+| POST | `/api/admin/ai/business-profiles/:profileId/review` |
+| POST | `/api/admin/ai/business-profiles/:profileId/approve` |
+| POST | `/api/admin/ai/business-profiles/:profileId/reject` |
+| GET | `/api/admin/ai/recommendations` |
+| GET | `/api/admin/ai/recommendations/:setId` |
+| POST | `/api/admin/ai/recommendations/:setId/recompute` |
+| POST | `/api/admin/ai/recommendations/:setId/review` |
+| POST | `/api/admin/ai/recommendations/:setId/approve` |
+| POST | `/api/admin/ai/recommendations/:setId/reject` |
+| GET | `/api/admin/ai/service-catalog/categories` |
+| GET | `/api/admin/ai/service-catalog/services` |
+| GET | `/api/admin/ai/service-catalog/services/:slug` |
+| POST | `/api/admin/ai/service-catalog/services` |
+| PATCH | `/api/admin/ai/service-catalog/services/:slug` |
+| GET | `/api/admin/ai/service-catalog/versions` |
+| POST | `/api/admin/ai/service-catalog/versions` |
+| POST | `/api/admin/ai/service-catalog/versions/:versionId/activate` |
+
+See root `.env.example` for `AI_INTELLIGENCE_*`, `AI_REASONING_*`, and
+`SERVICE_MATCH_*` variables.
 
 ## Media limits
 
@@ -64,4 +102,5 @@ pnpm --filter @miraaj/api test
 
 ## Out of scope
 
-Public upload UI, campaign generation, service matching, billing, and speech.
+Public upload UI, campaign generation, social publishing, Tasks.cash, billing,
+and speech/video.

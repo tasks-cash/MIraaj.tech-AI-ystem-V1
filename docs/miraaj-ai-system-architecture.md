@@ -633,8 +633,55 @@ vision schema, business/audience, and content-purpose scores. Thresholds:
 Mandatory review for medical/legal/financial, missing OCR packs, Tier 3 /
 untested locales, audience/business ambiguity, provider conflicts, etc.
 
-### 26.8 Explicitly out of scope (Prompt 3+)
+### 26.8 Explicitly out of scope for Prompt 2 (Prompt 3+)
 
-Campaign generation, service matching, social publishing, Tasks.cash / referral /
-QR tracking, landing pages, speech/TTS/video/audio analysis, full translation
-engine, public AI chat, public upload UI, admin dashboards, billing.
+Campaign generation, social publishing, Tasks.cash / referral / QR tracking,
+landing pages, speech/TTS/video/audio analysis, full translation engine, public
+AI chat, public upload UI, admin dashboards, billing. Service matching and
+business profiles belong to Prompt 3.
+
+## 27. Prompt 3 — business intelligence and service matching
+
+Prompt 3 transforms Prompt 2 analysis evidence into structured business
+profiles and ranked Miraaj.tech service recommendations. It does **not**
+generate campaigns, publish to social media, or integrate Tasks.cash.
+
+### 27.1 Ownership
+
+| Owner | Role |
+| --- | --- |
+| NestJS | Catalog persistence, versioning, deterministic matching, BI jobs, recommendations, review, admin APIs |
+| FastAPI | Optional business-reasoning suggestions only (disabled provider works offline) |
+| MongoDB | Catalog, policies, profiles, jobs, attempts, recommendation sets, reviews, feedback |
+| Redis | BullMQ `miraaj.ai.intelligence` (+ DLQ) |
+
+NestJS matching is the **final authority**. Providers cannot activate catalog
+items, bypass exclusions, or approve payment claims.
+
+### 27.2 Pipeline
+
+Usable Prompt 2 result → intelligence job → evidence load → optional reasoning →
+business profile → active catalog + matching policy → eligibility/exclusions →
+deterministic scores → bundles + phases → review or complete → immutable attempt
++ recommendation set.
+
+### 27.3 Critical audience rule
+
+Business-related imagery does **not** imply the viewer is a decision-maker.
+Patient/student/consumer/parent/public groups must not automatically receive
+B2B management-system recommendations. Professional groups with decision-maker
+evidence may be `eligible_b2b`.
+
+### 27.4 Catalog and compliance
+
+- Versioned individual services (not category-only).
+- Only `active` services auto-recommended.
+- Payment recommendations include EN/AR/FR compliance disclaimers; prohibited
+  claims (no KYC, guaranteed approval, etc.) are blocked.
+- Regulated domains (medical, legal, financial, education/minors, etc.) require
+  human review.
+
+### 27.5 Out of scope (later)
+
+Campaign copy/generation, social publishing, tracked links, QR codes, referral
+rewards, landing-page generation, billing, speech/video, public dashboards.

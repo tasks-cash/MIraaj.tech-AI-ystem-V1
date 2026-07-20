@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     MEDIA_FETCH_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
     MEDIA_FETCH_MAX_BYTES: int = Field(default=26_214_400, ge=1)
 
+    AI_REASONING_PROVIDER: str = Field(default="disabled", pattern="^(disabled|gemini)$")
+    AI_REASONING_MODEL: str = "gemini-2.0-flash"
+    AI_REASONING_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=600)
+    AI_REASONING_MAX_RETRIES: int = Field(default=1, ge=0, le=5)
+    AI_REASONING_MAX_INPUT_CHARS: int = Field(default=20_000, ge=100, le=200_000)
+
     @field_validator("LOG_LEVEL", mode="before")
     @classmethod
     def normalize_log_level(cls, value: object) -> str:
@@ -123,6 +129,10 @@ class Settings(BaseSettings):
     @property
     def vision_provider_active(self) -> bool:
         return self.VISION_PROVIDER_ENABLED and self.GEMINI_API_KEY is not None
+
+    @property
+    def ai_reasoning_provider_active(self) -> bool:
+        return self.AI_REASONING_PROVIDER == "gemini" and self.GEMINI_API_KEY is not None
 
 
 @lru_cache

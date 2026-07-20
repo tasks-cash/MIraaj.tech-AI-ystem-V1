@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.services.ocr.tesseract_provider import TesseractOCRProvider
 
 router = APIRouter(tags=["health"])
@@ -125,6 +125,22 @@ def media_dependency_readiness() -> dict[str, DependencyResult]:
             if vision_configured or not settings.VISION_PROVIDER_ENABLED
             else "VISION_PROVIDER_DISABLED",
         },
+        "intelligenceProvider": intelligence_provider_readiness(settings),
+    }
+
+
+def intelligence_provider_readiness(settings: Settings | None = None) -> DependencyResult:
+    resolved_settings = settings if settings is not None else get_settings()
+    reasoning_enabled = resolved_settings.AI_REASONING_PROVIDER == "gemini"
+    reasoning_configured = resolved_settings.ai_reasoning_provider_active
+    return {
+        "configured": reasoning_enabled,
+        "required": False,
+        "healthy": reasoning_configured or not reasoning_enabled,
+        "latencyMs": 0,
+        "safeError": None
+        if reasoning_configured or not reasoning_enabled
+        else "REASONING_PROVIDER_DISABLED",
     }
 
 
