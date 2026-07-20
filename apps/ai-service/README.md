@@ -44,6 +44,12 @@ timestamp, request/correlation IDs, idempotency key, body SHA-256, signature).
 | POST | `/internal/v1/intelligence/needs` |
 | POST | `/internal/v1/intelligence/contradictions` |
 | GET | `/internal/v1/intelligence/providers/status` |
+| POST | `/internal/v1/campaigns/strategy` |
+| POST | `/internal/v1/campaigns/generate` |
+| POST | `/internal/v1/campaigns/transcreate` |
+| POST | `/internal/v1/campaigns/quality-check` |
+| POST | `/internal/v1/campaigns/compliance-check` |
+| GET | `/internal/v1/campaigns/providers/status` |
 
 Media bytes are fetched from short-lived signed object URLs only. Hosts must be
 listed in `MEDIA_FETCH_ALLOWED_HOSTS`. Redirects and arbitrary URLs are rejected.
@@ -84,6 +90,47 @@ This module never connects to MongoDB, never exposes a public route, and
 never generates campaigns — it only returns reasoning signals for other
 internal services to act on.
 
+## Campaign generation + transcreation (Prompt 4)
+
+`app/api/internal_campaigns.py` drafts campaign strategy and creative
+content, transcreates existing content into another language, and runs
+deterministic quality/compliance checks. NestJS remains the sole authority on
+approval, publishing, and MongoDB persistence — this service only returns
+structured drafts and safety signals.
+
+- `AI_CAMPAIGN_PROVIDER=disabled` (default): `strategy` and `generate`
+  return an empty, `requiresReview=true` shell tagged
+  `CAMPAIGN_PROVIDER_DISABLED` — never fabricated marketing copy.
+  `quality_check` and `compliance_check` still run (they are fully
+  deterministic and provider-independent).
+- `AI_CAMPAIGN_PROVIDER=gemini`: reuses `GEMINI_API_KEY` and
+  `AI_CAMPAIGN_MODEL`/`AI_CAMPAIGN_PROVIDER_TIMEOUT_SECONDS`/
+  `AI_CAMPAIGN_PROVIDER_MAX_RETRIES`. `sourceContent` (OCR summary /
+  free-text context) is always wrapped as untrusted input and scanned for
+  prompt-injection phrasing (EN/AR/FR); a match forces
+  `prompt_injection_detected` into `reviewReasonCodes` regardless of what the
+  model returned.
+- `AI_TRANSLATION_PROVIDER=disabled|gemini` (`AI_TRANSLATION_MODEL`,
+  `AI_TRANSLATION_TIMEOUT_SECONDS`, `AI_TRANSLATION_MAX_RETRIES`) backs
+  `/campaigns/transcreate`. The disabled provider returns empty translated
+  text and `translation_unavailable` rather than echoing the source text.
+- Deterministic safety (`app/services/campaign/safety.py`, always active,
+  independent of provider): blocks prohibited claims (guaranteed results,
+  fake statistics, "no KYC", etc.), blocks sensitive-trait targeting and
+  face-recognition requests, verifies protected tokens (`Miraaj.tech`,
+  `Tasks.cash`, URLs, emails, phone numbers, currency amounts, numbers) are
+  preserved after transcreation, requires an EN/AR/FR payment disclosure
+  whenever `paymentServicePresent` is set, sets `direction: "rtl"` for
+  Arabic-family targets and `"ltr"` otherwise, and scores semantic drift to
+  flag human review when a translation likely lost meaning.
+- `AI_CAMPAIGN_MAX_INPUT_CHARS` / `AI_CAMPAIGN_MAX_OUTPUT_CHARS` bound
+  request/response size; oversized requests are rejected with
+  `CAMPAIGN_INPUT_TOO_LARGE` before any provider call.
+
+This module never connects to MongoDB, never approves, and never publishes —
+NestJS owns those steps and should treat every response as a draft pending
+human review when `requiresReview` is `true`.
+
 ## Tests
 
 ```bash
@@ -94,5 +141,5 @@ Automated tests never call the real Gemini API.
 
 ## Out of scope (later prompts)
 
-Campaign generation, service matching, speech/TTS, public upload UI, and full
-translation/transcreation engines.
+Service matching, speech/TTS, public upload UI, MongoDB access, and
+approval/publishing workflows (owned by NestJS).

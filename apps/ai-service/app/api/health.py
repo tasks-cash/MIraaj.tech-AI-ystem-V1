@@ -126,6 +126,8 @@ def media_dependency_readiness() -> dict[str, DependencyResult]:
             else "VISION_PROVIDER_DISABLED",
         },
         "intelligenceProvider": intelligence_provider_readiness(settings),
+        "campaignProvider": campaign_provider_readiness(settings),
+        "translationProvider": translation_provider_readiness(settings),
     }
 
 
@@ -141,6 +143,36 @@ def intelligence_provider_readiness(settings: Settings | None = None) -> Depende
         "safeError": None
         if reasoning_configured or not reasoning_enabled
         else "REASONING_PROVIDER_DISABLED",
+    }
+
+
+def campaign_provider_readiness(settings: Settings | None = None) -> DependencyResult:
+    resolved_settings = settings if settings is not None else get_settings()
+    campaign_enabled = resolved_settings.AI_CAMPAIGN_PROVIDER == "gemini"
+    campaign_configured = resolved_settings.ai_campaign_provider_active
+    return {
+        "configured": campaign_enabled,
+        "required": False,
+        "healthy": campaign_configured or not campaign_enabled,
+        "latencyMs": 0,
+        "safeError": None
+        if campaign_configured or not campaign_enabled
+        else "CAMPAIGN_PROVIDER_DISABLED",
+    }
+
+
+def translation_provider_readiness(settings: Settings | None = None) -> DependencyResult:
+    resolved_settings = settings if settings is not None else get_settings()
+    translation_enabled = resolved_settings.AI_TRANSLATION_PROVIDER == "gemini"
+    translation_configured = resolved_settings.ai_translation_provider_active
+    return {
+        "configured": translation_enabled,
+        "required": False,
+        "healthy": translation_configured or not translation_enabled,
+        "latencyMs": 0,
+        "safeError": None
+        if translation_configured or not translation_enabled
+        else "TRANSLATION_PROVIDER_DISABLED",
     }
 
 

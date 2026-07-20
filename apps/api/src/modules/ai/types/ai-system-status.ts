@@ -65,6 +65,30 @@ export interface AiSystemStatus {
   staleJobs: {
     reconciledRecently: number;
   };
+  campaigns: {
+    queue: QueueCountSnapshot;
+    deadLetter: QueueCountSnapshot;
+    workerConcurrency: number;
+    provider: string;
+    translationProvider: string;
+    autoApproveEnabled: boolean;
+    brandProfileVersion: number | null;
+    campaignPolicyVersion: number | null;
+    platformPolicyVersion: number | null;
+    compliancePolicyVersion: number | null;
+    glossaryVersion: number | null;
+    awaitingReviewJobs: number;
+    awaitingReviewPackages: number;
+  };
+  logging: {
+    subsystemState: "ready" | "degraded" | "unavailable";
+    lastSuccessfulLogEmission: string | null;
+    auditPersistenceState: string;
+    droppedLogCount: number;
+    failedAuditWriteCount: number;
+    traceExporterState: string;
+    metricsExporterState: string;
+  };
   error: {
     code: string;
     message: string;

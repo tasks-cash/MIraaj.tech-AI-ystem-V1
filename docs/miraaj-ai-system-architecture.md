@@ -778,3 +778,71 @@ removed by Prompt 3.
 
 Campaign copy/generation, social publishing, tracked links, QR codes, referral
 rewards, landing-page generation, billing, speech/video, public dashboards.
+
+## 28. Prompt 4 — campaign intelligence and multilingual package generation
+
+Prompt 4 converts **approved** Prompt 3 recommendation sets into structured,
+multilingual, platform-specific **campaign packages**. Packages are text briefs
+and copy only. Nothing is published automatically.
+
+### 28.1 Ownership
+
+| Layer | Owns |
+| --- | --- |
+| NestJS `apps/api` | Source eligibility, brand/policies, BullMQ campaign queues, persistence, deterministic validation/quality, human review, admin APIs, **final approval authority** |
+| FastAPI `apps/ai-service` | Campaign strategy/copy/transcreation provider adapters (disabled + Gemini), structured suggestions, provider safety — **no Mongo, no approval, no publish** |
+| MongoDB | Brand profiles, campaign jobs/attempts/briefs/packages/variants/reviews/feedback, policies, glossaries, prompt versions |
+| Redis | BullMQ `miraaj.ai.campaigns` (+ DLQ), locks, idempotency, progress |
+
+### 28.2 Pipeline
+
+Approved recommendation set → verify eligibility & promotion rules → load
+profile/catalog/brand → brief → strategy → master message → platform variants →
+transcreation → image/video/carousel/story **briefs** → deterministic validation →
+quality scores → human review → versioned package (no publish).
+
+### 28.3 Source and audience eligibility
+
+Consumes only approved (or explicitly overridden) Prompt 3 recommendation
+revisions with active catalog services. Blocks `unsuitable` promotion and
+consumer B2B mismatches (patient/student/restaurant-customer/hotel-guest/
+employee-only without decision-maker evidence). Payment and regulated domains
+always require human review.
+
+### 28.4 Taxonomies and policies
+
+Controlled enums: objectives, funnel stages, campaign types, platforms, content
+formats, CTA codes. Versioned **platform policy**, **compliance policy**,
+**campaign policy**, **brand profile** (Miraaj.tech v1), and **translation
+glossary**. Claims engine: approved / source_supported / requires_evidence /
+prohibited / unknown / human_review_required. No invented stats, clients,
+awards, or guaranteed payment approval.
+
+### 28.5 Multilingual and transcreation
+
+Reuses `LANGUAGE_REGISTRY`, translation/glossary/`CampaignLanguageVariant`
+contracts. Modes: source-only, translation, localized, transcreation,
+market-specific, bilingual, multilingual package. Generate only selected
+languages/locales (bounded). Preserve Miraaj.tech, Tasks.cash, URLs, contacts,
+numbers, disclosures. Tier 3 and untested locales require review.
+
+### 28.6 Queues and providers
+
+- Queues: `miraaj.ai.campaigns`, `miraaj.ai.campaigns.dead-letter`
+- Jobs: build-brief, strategy, generate, transcreate, validate, regenerate
+- Providers: `AI_CAMPAIGN_PROVIDER` / `AI_TRANSLATION_PROVIDER` (`disabled`|
+  `gemini`). Disabled mode: brief may exist; no fabricated copy.
+- Auto-approve off by default (`CAMPAIGN_AUTO_APPROVE_ENABLED=false`).
+
+### 28.7 Admin API and permissions
+
+Protected `/api/admin/ai/campaigns/*`, brand profiles, and policy read/manage
+routes. Permissions: `ai.campaigns.*`, `ai.campaignBriefs.*`,
+`ai.brandProfiles.*`, `ai.campaignPolicies.*`, `ai.platformPolicies.*`,
+`ai.compliancePolicies.*`, `ai.translationGlossaries.*`.
+
+### 28.8 Out of scope (later)
+
+Social OAuth/publishing, ad accounts, tracked links/UTM beyond placeholders, QR,
+Tasks.cash, landing pages, lead capture, billing, speech/TTS, image/video
+rendering, media editing, campaign analytics ingestion, public campaign UI.

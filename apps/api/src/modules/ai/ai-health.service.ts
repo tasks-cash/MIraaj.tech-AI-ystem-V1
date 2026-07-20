@@ -16,6 +16,10 @@ import { ServiceMatchingPolicyModel } from "./models/service-matching-policy.sch
 import { MediaQueueService } from "./queue/media-queue.service.js";
 import { IntelligenceQueueService } from "./queue/intelligence-queue.service.js";
 import { StaleJobService } from "./queue/stale-job.service.js";
+import { CampaignQueueService } from "./queue/campaign-queue.service.js";
+import { CampaignSeedService } from "./campaigns/campaign-seed.service.js";
+import { AuditEventService } from "./audit/audit-event.service.js";
+import { CampaignJobModel, CampaignPackageModel } from "./models/campaign.schema.js";
 import {
   AiServiceTimeoutError,
   AiServiceUnavailableError,
@@ -44,6 +48,12 @@ export class AiHealthService {
     private readonly intelligenceQueue: IntelligenceQueueService,
     @Inject(StaleJobService)
     private readonly staleJobService: StaleJobService,
+    @Inject(CampaignQueueService)
+    private readonly campaignQueue: CampaignQueueService,
+    @Inject(CampaignSeedService)
+    private readonly campaignSeed: CampaignSeedService,
+    @Inject(AuditEventService)
+    private readonly auditEvents: AuditEventService,
   ) {}
 
   async getSystemStatus(input?: {
@@ -67,6 +77,9 @@ export class AiHealthService {
       serviceCount,
       categoryCount,
       staleCount,
+      campaignQueueStats,
+      awaitingReviewCampaignJobs,
+      awaitingReviewCampaignPackages,
     ] = await Promise.all([
       this.infrastructure.dependencyStatus(),
       this.mediaQueue.getQueueStats(),
@@ -114,6 +127,35 @@ export class AiHealthService {
       ),
       withTimeout(ServiceCategoryModel.countDocuments({}), 1_000, 0),
       withTimeout(this.staleJobService.reconcileStaleJobs(), 1_000, 0),
+      withTimeout(
+        this.campaignQueue.getQueueStats(),
+        1_000,
+        { campaigns: { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0 }, deadLetter: { waiting: 0, active: 0, completed: 0, failed: 0 } },
+      ),
+      withTimeout(
+        CampaignJobModel.countDocuments({ status: "awaiting_review" }),
+        1_000,
+        0,
+      ),
+      withTimeout(
+        CampaignPackageModel.countDocuments({ status: "awaiting_review" }),
+        1_000,
+        0,
+      ),
+    ]);
+
+    const [
+      activeBrandProfile,
+      activeCampaignPolicy,
+      activePlatformPolicy,
+      activeCompliancePolicy,
+      activeGlossary,
+    ] = await Promise.all([
+      this.campaignSeed.getActiveBrandProfileOrThrow().catch(() => null),
+      this.campaignSeed.getActiveCampaignPolicyOrThrow().catch(() => null),
+      this.campaignSeed.getActivePlatformPolicyOrThrow().catch(() => null),
+      this.campaignSeed.getActiveCompliancePolicyOrThrow().catch(() => null),
+      this.campaignSeed.getActiveGlossaryOrThrow().catch(() => null),
     ]);
     const minio = await this.checkMinio();
     const dlqFailed = await this.intelligenceQueue.deadLetterQueue
@@ -157,6 +199,31 @@ export class AiHealthService {
       reasoningConfigured: Boolean(environment.AI_REASONING_MODEL),
     };
 
+    const campaignsBlock: AiSystemStatus["campaigns"] = {
+      queue: campaignQueueStats.campaigns,
+      deadLetter: campaignQueueStats.deadLetter,
+      workerConcurrency: environment.AI_CAMPAIGN_WORKER_CONCURRENCY,
+      provider: environment.AI_CAMPAIGN_PROVIDER,
+      translationProvider: environment.AI_TRANSLATION_PROVIDER,
+      autoApproveEnabled: environment.CAMPAIGN_AUTO_APPROVE_ENABLED,
+      brandProfileVersion: activeBrandProfile?.version ?? null,
+      campaignPolicyVersion: activeCampaignPolicy?.version ?? null,
+      platformPolicyVersion: activePlatformPolicy?.version ?? null,
+      compliancePolicyVersion: activeCompliancePolicy?.version ?? null,
+      glossaryVersion: activeGlossary?.version ?? null,
+      awaitingReviewJobs: awaitingReviewCampaignJobs,
+      awaitingReviewPackages: awaitingReviewCampaignPackages,
+    };
+    const loggingBlock: AiSystemStatus["logging"] = {
+      subsystemState: "ready",
+      lastSuccessfulLogEmission: new Date().toISOString(),
+      auditPersistenceState: this.auditEvents.getStatus().state,
+      droppedLogCount: 0,
+      failedAuditWriteCount: this.auditEvents.getStatus().droppedAuditWrites,
+      traceExporterState: this.auditEvents.getStatus().traceExporterState,
+      metricsExporterState: this.auditEvents.getStatus().metricsExporterState,
+    };
+
     try {
       const [health, readiness, version, ocrStatus, providersStatus] =
         await Promise.all([
@@ -194,6 +261,8 @@ export class AiHealthService {
         staleJobs: {
           reconciledRecently: staleCount,
         },
+        campaigns: campaignsBlock,
+        logging: loggingBlock,
         error: null,
       };
     } catch (error: unknown) {
@@ -231,6 +300,8 @@ export class AiHealthService {
         staleJobs: {
           reconciledRecently: staleCount,
         },
+        campaigns: campaignsBlock,
+        logging: loggingBlock,
         error: safe,
       };
     }

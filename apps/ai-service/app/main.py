@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 from app.api.health import router as health_router
+from app.api.internal_campaigns import router as internal_campaigns_router
 from app.api.internal_intelligence import router as internal_intelligence_router
 from app.api.internal_media import router as internal_media_router
 from app.core.config import get_settings
@@ -124,3 +125,4 @@ async def protect_internal_routes(
 app.include_router(health_router)
 app.include_router(internal_media_router)
 app.include_router(internal_intelligence_router)
+app.include_router(internal_campaigns_router)

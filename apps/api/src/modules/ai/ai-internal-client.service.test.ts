@@ -175,6 +175,28 @@ describe("AI health service", () => {
       {
         reconcileStaleJobs: () => Promise.resolve(0),
       } as never,
+      {
+        getQueueStats: () =>
+          Promise.resolve({
+            campaigns: { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0 },
+            deadLetter: { waiting: 0, active: 0, completed: 0, failed: 0 },
+          }),
+      } as never,
+      {
+        getActiveBrandProfileOrThrow: () => Promise.reject(new Error("not found")),
+        getActiveCampaignPolicyOrThrow: () => Promise.reject(new Error("not found")),
+        getActivePlatformPolicyOrThrow: () => Promise.reject(new Error("not found")),
+        getActiveCompliancePolicyOrThrow: () => Promise.reject(new Error("not found")),
+        getActiveGlossaryOrThrow: () => Promise.reject(new Error("not found")),
+      } as never,
+      {
+        getStatus: () => ({
+          state: "ready",
+          droppedAuditWrites: 0,
+          traceExporterState: "disabled",
+          metricsExporterState: "disabled",
+        }),
+      } as never,
     );
     const status = await service.getSystemStatus();
     expect(status.error?.code).toBe("AI_SERVICE_UNAVAILABLE");

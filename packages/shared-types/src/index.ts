@@ -110,3 +110,4 @@ export * from "./language-registry.js";
 export * from "./multilingual-contracts.js";
 export * from "./media-analysis.js";
 export * from "./business-intelligence.js";
+export * from "./campaign-intelligence.js";

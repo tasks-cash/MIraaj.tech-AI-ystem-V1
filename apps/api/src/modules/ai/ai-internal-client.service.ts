@@ -175,6 +175,95 @@ export class AiInternalClientService {
     });
   }
 
+  /**
+   * Optional campaign strategy/generation/transcreation/quality/compliance
+   * provider. NestJS's CampaignJobService and CampaignWorkerService already
+   * fixed the objective, audience, and services before any of these calls
+   * are made — the provider only ever drafts within that fixed scope, and
+   * NestJS validation/quality scoring remains authoritative regardless of
+   * what the provider returns.
+   */
+  async postCampaignStrategy(
+    body: Record<string, unknown>,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/internal/v1/campaigns/strategy",
+      body,
+      timeoutMs: loadEnvironment().AI_CAMPAIGN_PROVIDER_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `campaign-strategy-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async postCampaignGenerate(
+    body: Record<string, unknown>,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/internal/v1/campaigns/generate",
+      body,
+      timeoutMs: loadEnvironment().AI_CAMPAIGN_PROVIDER_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `campaign-generate-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async postCampaignTranscreate(
+    body: Record<string, unknown>,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/internal/v1/campaigns/transcreate",
+      body,
+      timeoutMs: loadEnvironment().AI_TRANSLATION_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `campaign-transcreate-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async postCampaignQualityCheck(
+    body: Record<string, unknown>,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/internal/v1/campaigns/quality-check",
+      body,
+      timeoutMs: loadEnvironment().AI_CAMPAIGN_PROVIDER_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `campaign-quality-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async postCampaignComplianceCheck(
+    body: Record<string, unknown>,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/internal/v1/campaigns/compliance-check",
+      body,
+      timeoutMs: loadEnvironment().AI_CAMPAIGN_PROVIDER_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `campaign-compliance-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async getCampaignProvidersStatus(input?: {
+    requestId?: string;
+    correlationId?: string;
+  }): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "GET",
+      path: "/internal/v1/campaigns/providers/status",
+      ...input,
+    });
+  }
+
   private async requestJson<T>(input: {
     method: "GET" | "POST";
     path: string;

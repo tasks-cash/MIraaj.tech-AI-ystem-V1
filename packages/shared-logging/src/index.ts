@@ -1,5 +1,7 @@
 import pino, { type Logger, type LoggerOptions } from "pino";
 
+export * from "./observability.js";
+
 const redactPaths = [
   "authorization",
   "cookie",

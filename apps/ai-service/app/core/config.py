@@ -75,6 +75,19 @@ class Settings(BaseSettings):
     AI_REASONING_MAX_RETRIES: int = Field(default=1, ge=0, le=5)
     AI_REASONING_MAX_INPUT_CHARS: int = Field(default=20_000, ge=100, le=200_000)
 
+    # Prompt 4 — campaign generation + transcreation. Mirrors Nest defaults in
+    # packages/shared-config (AI_CAMPAIGN_*, AI_TRANSLATION_*).
+    AI_CAMPAIGN_PROVIDER: str = Field(default="disabled", pattern="^(disabled|gemini)$")
+    AI_CAMPAIGN_MODEL: str = "gemini-2.0-flash"
+    AI_CAMPAIGN_PROVIDER_TIMEOUT_SECONDS: int = Field(default=90, ge=1, le=600)
+    AI_CAMPAIGN_PROVIDER_MAX_RETRIES: int = Field(default=1, ge=0, le=5)
+    AI_CAMPAIGN_MAX_INPUT_CHARS: int = Field(default=50_000, ge=1_000, le=200_000)
+    AI_CAMPAIGN_MAX_OUTPUT_CHARS: int = Field(default=100_000, ge=1_000, le=500_000)
+    AI_TRANSLATION_PROVIDER: str = Field(default="disabled", pattern="^(disabled|gemini)$")
+    AI_TRANSLATION_MODEL: str = "gemini-2.0-flash"
+    AI_TRANSLATION_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=600)
+    AI_TRANSLATION_MAX_RETRIES: int = Field(default=1, ge=0, le=5)
+
     @field_validator("LOG_LEVEL", mode="before")
     @classmethod
     def normalize_log_level(cls, value: object) -> str:
@@ -133,6 +146,14 @@ class Settings(BaseSettings):
     @property
     def ai_reasoning_provider_active(self) -> bool:
         return self.AI_REASONING_PROVIDER == "gemini" and self.GEMINI_API_KEY is not None
+
+    @property
+    def ai_campaign_provider_active(self) -> bool:
+        return self.AI_CAMPAIGN_PROVIDER == "gemini" and self.GEMINI_API_KEY is not None
+
+    @property
+    def ai_translation_provider_active(self) -> bool:
+        return self.AI_TRANSLATION_PROVIDER == "gemini" and self.GEMINI_API_KEY is not None
 
 
 @lru_cache

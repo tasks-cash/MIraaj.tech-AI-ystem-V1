@@ -51,6 +51,36 @@ export const AI_PERMISSIONS = {
   MATCHING_POLICIES_READ: "ai.matchingPolicies.read",
   MATCHING_POLICIES_MANAGE: "ai.matchingPolicies.manage",
   MATCHING_POLICIES_PUBLISH: "ai.matchingPolicies.publish",
+  CAMPAIGNS_CREATE: "ai.campaigns.create",
+  CAMPAIGNS_READ: "ai.campaigns.read",
+  CAMPAIGNS_UPDATE: "ai.campaigns.update",
+  CAMPAIGNS_RETRY: "ai.campaigns.retry",
+  CAMPAIGNS_CANCEL: "ai.campaigns.cancel",
+  CAMPAIGNS_REGENERATE: "ai.campaigns.regenerate",
+  CAMPAIGNS_REVIEW: "ai.campaigns.review",
+  CAMPAIGNS_APPROVE: "ai.campaigns.approve",
+  CAMPAIGNS_REJECT: "ai.campaigns.reject",
+  CAMPAIGN_BRIEFS_CREATE: "ai.campaignBriefs.create",
+  CAMPAIGN_BRIEFS_READ: "ai.campaignBriefs.read",
+  CAMPAIGN_BRIEFS_UPDATE: "ai.campaignBriefs.update",
+  BRAND_PROFILES_READ: "ai.brandProfiles.read",
+  BRAND_PROFILES_CREATE: "ai.brandProfiles.create",
+  BRAND_PROFILES_UPDATE: "ai.brandProfiles.update",
+  BRAND_PROFILES_PUBLISH: "ai.brandProfiles.publish",
+  BRAND_PROFILES_DEPRECATE: "ai.brandProfiles.deprecate",
+  CAMPAIGN_POLICIES_READ: "ai.campaignPolicies.read",
+  CAMPAIGN_POLICIES_MANAGE: "ai.campaignPolicies.manage",
+  CAMPAIGN_POLICIES_PUBLISH: "ai.campaignPolicies.publish",
+  PLATFORM_POLICIES_READ: "ai.platformPolicies.read",
+  PLATFORM_POLICIES_MANAGE: "ai.platformPolicies.manage",
+  PLATFORM_POLICIES_PUBLISH: "ai.platformPolicies.publish",
+  COMPLIANCE_POLICIES_READ: "ai.compliancePolicies.read",
+  COMPLIANCE_POLICIES_MANAGE: "ai.compliancePolicies.manage",
+  COMPLIANCE_POLICIES_PUBLISH: "ai.compliancePolicies.publish",
+  TRANSLATION_GLOSSARIES_READ: "ai.translationGlossaries.read",
+  TRANSLATION_GLOSSARIES_MANAGE: "ai.translationGlossaries.manage",
+  TRANSLATION_GLOSSARIES_PUBLISH: "ai.translationGlossaries.publish",
+  AUDIT_LOGS_READ: "ai.auditLogs.read",
 } as const;
 
 export const ALL_TEMPORARY_ADMIN_PERMISSIONS = Object.values(AI_PERMISSIONS);
@@ -176,6 +206,46 @@ export const apiEnvironmentSchema = serverEnvironmentSchema
       .min(0)
       .max(1)
       .default(0.65),
+    AI_CAMPAIGN_QUEUE_NAME: z.string().min(1).default("miraaj.ai.campaigns"),
+    AI_CAMPAIGN_DLQ_NAME: z
+      .string()
+      .min(1)
+      .default("miraaj.ai.campaigns.dead-letter"),
+    AI_CAMPAIGN_WORKER_CONCURRENCY: positiveInt(1, 16).default(2),
+    AI_CAMPAIGN_MAX_RETRIES: positiveInt(0, 10).default(3),
+    AI_CAMPAIGN_TIMEOUT_SECONDS: positiveInt(10, 600).default(180),
+    AI_CAMPAIGN_STALE_SECONDS: positiveInt(30, 3_600).default(420),
+    AI_CAMPAIGN_RECONCILE_INTERVAL_SECONDS: positiveInt(15, 3_600).default(60),
+    AI_CAMPAIGN_PROVIDER: z.enum(["disabled", "gemini"]).default("disabled"),
+    AI_CAMPAIGN_MODEL: z.string().default(""),
+    AI_CAMPAIGN_PROVIDER_TIMEOUT_SECONDS: positiveInt(5, 300).default(90),
+    AI_CAMPAIGN_PROVIDER_MAX_RETRIES: positiveInt(0, 5).default(2),
+    AI_CAMPAIGN_MAX_INPUT_CHARS: positiveInt(1_000, 200_000).default(50_000),
+    AI_CAMPAIGN_MAX_OUTPUT_CHARS: positiveInt(1_000, 500_000).default(100_000),
+    AI_TRANSLATION_PROVIDER: z.enum(["disabled", "gemini"]).default("disabled"),
+    AI_TRANSLATION_MODEL: z.string().default(""),
+    AI_TRANSLATION_TIMEOUT_SECONDS: positiveInt(5, 300).default(60),
+    AI_TRANSLATION_MAX_RETRIES: positiveInt(0, 5).default(2),
+    CAMPAIGN_MAX_SERVICES: positiveInt(1, 50).default(10),
+    CAMPAIGN_MAX_PLATFORMS: positiveInt(1, 20).default(8),
+    CAMPAIGN_MAX_LANGUAGES: positiveInt(1, 30).default(10),
+    CAMPAIGN_MAX_LOCALES: positiveInt(1, 30).default(10),
+    CAMPAIGN_MAX_PLATFORM_VARIANTS: positiveInt(1, 100).default(40),
+    CAMPAIGN_MAX_LANGUAGE_VARIANTS: positiveInt(1, 50).default(20),
+    CAMPAIGN_MAX_HASHTAGS_PER_VARIANT: positiveInt(1, 50).default(20),
+    CAMPAIGN_MAX_KEYWORDS_PER_VARIANT: positiveInt(1, 100).default(30),
+    CAMPAIGN_QUALITY_HIGH_MIN: z.coerce.number().min(0).max(1).default(0.88),
+    CAMPAIGN_QUALITY_REVIEW_MIN: z.coerce.number().min(0).max(1).default(0.65),
+    CAMPAIGN_BRAND_SCORE_MIN: z.coerce.number().min(0).max(1).default(0.8),
+    CAMPAIGN_COMPLIANCE_SCORE_MIN: z.coerce.number().min(0).max(1).default(0.95),
+    CAMPAIGN_LANGUAGE_SCORE_MIN: z.coerce.number().min(0).max(1).default(0.78),
+    CAMPAIGN_SEMANTIC_PRESERVATION_MIN: z.coerce
+      .number()
+      .min(0)
+      .max(1)
+      .default(0.9),
+    CAMPAIGN_AUDIENCE_FIT_MIN: z.coerce.number().min(0).max(1).default(0.75),
+    CAMPAIGN_AUTO_APPROVE_ENABLED: environmentBoolean.default(false),
   })
   .superRefine((environment, context) => {
     if (
@@ -205,6 +275,16 @@ export const apiEnvironmentSchema = serverEnvironmentSchema
         path: ["SERVICE_MATCH_REVIEW_MIN"],
         message:
           "SERVICE_MATCH_REVIEW_MIN must be <= SERVICE_MATCH_AUTO_APPROVE_MIN",
+      });
+    }
+    if (
+      environment.CAMPAIGN_QUALITY_REVIEW_MIN > environment.CAMPAIGN_QUALITY_HIGH_MIN
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["CAMPAIGN_QUALITY_REVIEW_MIN"],
+        message:
+          "CAMPAIGN_QUALITY_REVIEW_MIN must be <= CAMPAIGN_QUALITY_HIGH_MIN",
       });
     }
   });
