@@ -157,11 +157,11 @@ describe("Prompt 3 — catalog seed idempotency", () => {
     expect(policies.activeCount()).toBe(1);
   });
 
-  it("declares 150+ unique service slugs across categories with no duplicates", async () => {
+  it("declares 280+ unique service slugs across categories with no duplicates", async () => {
     const { CATALOG_SEED_SERVICES } = await import(
       "./catalog/catalog-seed-data.js"
     );
-    expect(CATALOG_SEED_SERVICES.length).toBeGreaterThanOrEqual(150);
+    expect(CATALOG_SEED_SERVICES.length).toBeGreaterThanOrEqual(280);
     const slugs = CATALOG_SEED_SERVICES.map((item) => item.slug);
     expect(new Set(slugs).size).toBe(slugs.length);
   });

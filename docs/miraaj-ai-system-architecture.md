@@ -681,7 +681,100 @@ evidence may be `eligible_b2b`.
 - Regulated domains (medical, legal, financial, education/minors, etc.) require
   human review.
 
-### 27.5 Out of scope (later)
+### 27.5 Matching scores and penalties
+
+Deterministic NestJS scoring uses a versioned matching policy. Default weights
+(sum to 1.0) emphasize `needFit` (0.14), `businessTypeFit` (0.16), and
+`audienceFit` (0.12); `decisionMakerFit` and `professionalContextFit` gate
+B2B-only services against consumer contexts.
+
+**Score breakdown dimensions** (all persisted on each match attempt):
+
+| Dimension | Role |
+| --- | --- |
+| `businessTypeFit` / `industryFit` | Vertical and industry alignment |
+| `organizationFit` | Organization model alignment |
+| `audienceFit` | Supported professional audience |
+| `decisionMakerFit` | Decision-maker evidence vs policy minimum |
+| `professionalContextFit` | Professional vs consumer group context |
+| `needFit` / `painPointFit` / `objectiveFit` | Declared needs and objectives overlap |
+| `digitalMaturityFit` / `businessStageFit` | Down-weights phase ≥ 3 items for `none`/`basic` maturity or pre-launch stages |
+| `marketFit` / `languageFit` | Country availability and locale support |
+| `channelFit` / `integrationFit` | Channel and integration readiness |
+| `urgencyFit` / `securityFit` | Urgency signals and security sensitivity |
+| `paymentReadinessFit` / `automationReadinessFit` | Operational readiness for payments and automation |
+| `capabilityAvailabilityFit` / `prerequisiteFit` | Capability and prerequisite state |
+| `complianceFit` | Regulated-domain and compliance alignment |
+
+**Penalties** (subtracted from the weighted score):
+
+| Penalty | Typical trigger |
+| --- | --- |
+| `consumerAudiencePenalty` (1.0) | Hard exclusion: B2B-only service + patient/student/consumer audience |
+| `audienceAmbiguityPenalty` | Audience not in service list and not professional |
+| `businessTypeAmbiguityPenalty` | Business type mismatch with low confidence |
+| `contradictionPenalty` | Conflicting business vs audience evidence |
+| `unsupportedMarketPenalty` | Service unavailable in profile country when known |
+| `unavailableCapabilityPenalty` / `missingPrerequisitePenalty` | Blocked or prerequisite-gated services |
+| `regulatedDomainPenalty` | Regulated vertical flagged for human review |
+| `providerDependencyPenalty` | Payment integrations depending on licensed third parties |
+| `lowEvidencePenalty` / `duplicateRecommendationPenalty` / `incompatibleServicePenalty` | Quality and deduplication guards |
+
+Service states: `recommended`, `recommended_with_prerequisites`, `optional`,
+`future_phase`, `blocked`, `excluded`, `review_required`, `unavailable`.
+Hard exclusions apply for inactive services, unsupported markets, and B2B-only
+services against consumer/patient/student/guest audiences without decision-maker
+evidence. Scores are reproducible from matching-policy version, catalog version,
+profile revision, and source analysis revision.
+
+### 27.6 Payment compliance (EN / AR / FR)
+
+Payment recommendations always attach `PAYMENT_COMPLIANCE_DISCLAIMERS` in English,
+Arabic, and French from `@miraaj/shared-types`:
+
+- **EN:** Miraaj.tech provides technical integration, provider-selection guidance and lawful onboarding support. Financial accounts and merchant services are supplied by licensed third-party providers and remain subject to identity verification, company verification, country availability, activity eligibility and provider approval.
+- **AR:** تقدم Miraaj.tech خدمات التكامل التقني، والمساعدة في اختيار مزود الخدمة، ودعم إجراءات الربط القانونية. يتم توفير الحسابات المالية وخدمات التجار من خلال جهات مرخصة، وتخضع للتحقق من الهوية، والتحقق من الشركة، وتوفر الخدمة في البلد، وأهلية النشاط، وموافقة مزود الخدمة.
+- **FR:** Miraaj.tech fournit l'intégration technique, l'aide au choix du prestataire et l'accompagnement légal à l'intégration. Les comptes financiers et services marchands sont fournis par des prestataires tiers agréés et restent soumis à la vérification d'identité, à la vérification de l'entreprise, à la disponibilité dans le pays, à l'éligibilité de l'activité et à l'approbation du prestataire.
+
+Prohibited claims (guaranteed approval, no KYC/KYB, anonymous accounts, bypassing
+country rules, “Miraaj.tech is a bank”, etc.) are blocked by
+`containsProhibitedPaymentClaim()` in tests and catalog copy review. NestJS
+matching never implies provider approval; FastAPI reasoning cannot override this.
+
+### 27.7 Prompt-injection defense
+
+OCR, vision, and user-supplied text are **untrusted evidence**, not instructions.
+The FastAPI `prompt_injection.py` module strips or flags instruction-like patterns
+before provider calls; reasoning prompts separate system instructions from source
+content. Invalid or suspicious provider JSON is rejected with bounded repair, then
+fails safe without mutating deterministic profile fields. Injection cannot activate
+catalog items, override exclusions, approve payment claims, or reveal secrets.
+Multilingual injection cases are tested.
+
+### 27.8 Queues and permissions
+
+| Queue | Purpose |
+| --- | --- |
+| `miraaj.ai.intelligence` | Business-profile build, service matching, recommendation recompute |
+| `miraaj.ai.intelligence.dead-letter` | Failed intelligence jobs after retries |
+
+Job names (BullMQ, `AI_INTELLIGENCE_JOB_NAMES`): `build-business-profile`,
+`match-services`, `recompute-recommendations`.
+
+Prompt 3 admin routes require bearer token + permission checks (temporary
+`ADMIN_API_TOKEN` until full RBAC). Declared permissions in `@miraaj/shared-config`:
+
+- Intelligence jobs: `ai.intelligence.create`, `.read`, `.retry`, `.cancel`
+- Business profiles: `ai.businessProfiles.read`, `.review`, `.approve`, `.reject`
+- Recommendations: `ai.recommendations.read`, `.recompute`, `.review`, `.approve`, `.reject`
+- Service catalog: `ai.serviceCatalog.read`, `.create`, `.update`, `.publish`, `.deprecate`
+- Matching policies: `ai.matchingPolicies.read`, `.manage`, `.publish`
+
+Multilingual admin permissions from §25.2 (`ai.languages.*`, `ai.translation.*`,
+`ai.glossary.*`) remain declared for later identity integration and are **not**
+removed by Prompt 3.
+
+### 27.9 Out of scope (later)
 
 Campaign copy/generation, social publishing, tracked links, QR codes, referral
 rewards, landing-page generation, billing, speech/video, public dashboards.
