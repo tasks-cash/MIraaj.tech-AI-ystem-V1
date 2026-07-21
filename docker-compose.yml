@@ -1,5 +1,8 @@
 services:
+  # Legacy/pre-existing Next.js app. Not part of the default AI-system runtime.
+  # Start only with: docker compose --profile web up -d web
   web:
+    profiles: ["web"]
     build:
       context: .
       dockerfile: apps/web/Dockerfile

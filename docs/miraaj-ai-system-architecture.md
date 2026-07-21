@@ -151,14 +151,20 @@ environment variables for NestJS. Upload signing and media records are deferred.
 
 ## 14. Final architecture implemented during this phase
 
-Development topology:
+Default Docker runtime is **API-only** (no public web container):
 
 ```text
-Browser → apps/web:3200 → apps/api:4200
-                              │ HMAC-signed internal HTTP
-                              └→ ai-service:8200
+Operator / platform → apps/api:4200
+                         │ HMAC-signed internal HTTP
+                         └→ ai-service:8200
 Host loopback only: MongoDB:27020 / Redis:6383 / MinIO:9200-9201
+BullMQ workers run inside NestJS (media, intelligence, campaigns)
 ```
+
+`docker compose up -d` starts `api`, `ai-service`, `mongo`, `redis`, `minio`
+(and `minio-init`). The legacy `web` service is behind Compose profile `web`
+and starts only with `docker compose --profile web up -d web`. Do not treat
+`apps/web` as part of the production AI-system runtime.
 
 Docker publishes FastAPI and local infrastructure ports on host loopback only.
 Containers use the private Compose service address
@@ -166,16 +172,17 @@ Containers use the private Compose service address
 `127.0.0.1`; Compose deliberately overrides the container bind address to
 `0.0.0.0` inside its isolated network.
 
-Compose does not inject the complete root `.env` into every service. The web
-container receives only browser-safe URLs and development flags. NestJS and
-FastAPI receive explicit least-privilege variable lists; `ADMIN_API_TOKEN`,
-MongoDB, S3, and encryption credentials are not passed to the web or FastAPI
-containers unless that service actually consumes them.
+Compose does not inject the complete root `.env` into every service. When the
+optional web profile is enabled, that container receives only browser-safe URLs
+and development flags. NestJS and FastAPI receive explicit least-privilege
+variable lists; `ADMIN_API_TOKEN`, MongoDB, S3, and encryption credentials are
+not passed to the web or FastAPI containers unless that service actually
+consumes them.
 
 Production topology:
 
 ```text
-Internet → platform edge/firewall → apps/web and apps/api
+Internet → platform edge/firewall → apps/api
                                       │ private service network only
                                       └→ apps/ai-service:8200
 Managed MongoDB / Redis / object storage
@@ -188,12 +195,12 @@ NestJS for AI work in later phases.
 
 | Component | Host port |
 | --- | ---: |
-| Next.js web | 3200 |
 | NestJS API | 4200 |
 | FastAPI AI | 8200 |
 | MongoDB | 27020 |
 | Redis | 6383 |
 | MinIO API / console | 9200 / 9201 |
+| Legacy Next.js web (Compose profile `web` only) | 3200 |
 
 ## 16. Internal service communication flow
 
@@ -287,6 +294,21 @@ validation message.
 
 ## 19. Development commands
 
+Docker (default backend runtime):
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+Optional legacy web container:
+
+```bash
+docker compose --profile web up -d web
+```
+
+Host-side packages (API + AI only):
+
 ```bash
 corepack enable
 corepack prepare pnpm@9.15.9 --activate
@@ -294,7 +316,7 @@ cp .env.example .env
 pnpm install
 pnpm ai:install
 pnpm dev:infra
-pnpm dev:all
+pnpm --filter @miraaj/api --filter @miraaj/ai-service --parallel dev
 ```
 
 ## 20. Production commands
@@ -303,14 +325,14 @@ pnpm dev:all
 pnpm build
 pnpm --filter @miraaj/api start
 pnpm --filter @miraaj/ai-service start
-pnpm --filter @miraaj/web start
 ```
 
 Use platform-managed MongoDB/Redis/S3 and private networking for FastAPI.
 Do not assign FastAPI a public domain. Bind it to a private service interface,
 apply platform network policy/firewall rules, and allow only NestJS and
 infrastructure probes. The production API refuses temporary admin-token mode
-unless the explicit secure override is present.
+unless the explicit secure override is present. Do not deploy the legacy
+`apps/web` surface as part of this AI-system runtime.
 
 ## 21. Health-check commands
 

@@ -1,23 +1,36 @@
 # Miraaj.tech AI System
 
-Existing multilingual Next.js website plus the NestJS and private FastAPI foundation for
-the Miraaj.tech AI System.
+API-only backend for the Miraaj.tech AI System: NestJS API, private FastAPI AI
+service, MongoDB, Redis, MinIO, and in-process BullMQ workers.
 
-## Local training with Docker
+A legacy Next.js app remains under `apps/web` but is **not** part of the default
+Docker runtime and must not be treated as the production surface for this project.
+
+## Local training with Docker (default: backend only)
 
 ```bash
 cp .env.example .env
-docker compose up --build
+docker compose up -d --build
 ```
 
-Local services:
+`docker compose up -d` starts only the AI-system backend:
 
-- Web: `http://localhost:3200`
-- API: `http://localhost:4200`
-- AI health: `http://localhost:8200/health`
-- MinIO console: `http://localhost:9201`
-- MongoDB: `localhost:27020`
-- Redis: `localhost:6383`
+- NestJS API: `http://localhost:4200`
+- FastAPI AI (loopback): `http://127.0.0.1:8200/health`
+- MinIO API / console (loopback): `http://127.0.0.1:9200` / `http://127.0.0.1:9201`
+- MongoDB (loopback): `localhost:27020`
+- Redis (loopback): `localhost:6383`
+
+BullMQ workers run inside the NestJS API process (media, intelligence, campaigns).
+
+### Optional legacy web profile
+
+The `web` service is gated behind the Compose profile `web` and does not start by
+default:
+
+```bash
+docker compose --profile web up -d web
+```
 
 ## Local development without Docker
 
@@ -28,8 +41,10 @@ cp .env.example .env
 pnpm install
 pnpm ai:install
 pnpm dev:infra
-pnpm dev:all
+pnpm --filter @miraaj/api --filter @miraaj/ai-service --parallel dev
 ```
+
+`pnpm dev:infra` starts MongoDB, Redis, and MinIO via Compose (no web container).
 
 ## Quality checks
 
@@ -43,15 +58,11 @@ pnpm build
 
 ## Production upload
 
-Deploy the same repository to Vercel, Render, Railway, or a compatible platform with
-`pnpm build`. Use managed MongoDB, Redis, and S3-compatible storage in production.
-Configure all secrets in the platform dashboard. The FastAPI service must use private
-networking and must not be exposed directly to browser clients.
+Deploy the NestJS API and private FastAPI AI service to a compatible platform
+(Render, Railway, or similar) with `pnpm build`. Use managed MongoDB, Redis, and
+S3-compatible storage. Configure all secrets in the platform dashboard. The
+FastAPI service must use private networking and must not be exposed directly to
+browser clients.
 
-See `docs/miraaj-ai-system-architecture.md` for the audited architecture and execution
-strategy.
-# Tasks.cash-V2-new-level
-# Tasks.cash-V2-new-level
-# MIraaj.tech-AI-ystem-V1
-# MIraaj.tech-AI-ystem-V1
-# MIraaj.tech-AI-ystem-V1
+See `docs/miraaj-ai-system-architecture.md` for the audited architecture and
+execution strategy.
