@@ -202,9 +202,9 @@ export class AiHealthService {
         null,
       ),
       withTimeout(
-        CreativeProviderCapabilityModel.findOne({ status: "active" })
-          .sort({ version: -1 })
-          .lean() as Promise<{ version: number } | null>,
+        CreativeProviderCapabilityModel.countDocuments({}).then((count) =>
+          count > 0 ? ({ version: 1 } as { version: number }) : null,
+        ),
         1_000,
         null,
       ),
