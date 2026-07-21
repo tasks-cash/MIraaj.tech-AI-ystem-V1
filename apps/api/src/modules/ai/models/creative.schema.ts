@@ -229,11 +229,13 @@ const creativeAssetSchema = new Schema(
     correlationId: { type: String, required: true },
     createdBy: { type: String, required: true },
     providerState: { type: String, default: "disabled" },
+    usageMetadata: { type: Schema.Types.Mixed, default: {} },
   },
   { timestamps: true, collection: "ai_creative_assets" },
 );
 creativeAssetSchema.index({ status: 1, createdAt: -1 });
 creativeAssetSchema.index({ campaignPackageId: 1, currentRevision: 1 });
+creativeAssetSchema.index({ providerJobId: 1, status: 1 });
 
 export type CreativeAssetDocument = InferSchemaType<
   typeof creativeAssetSchema
@@ -572,6 +574,12 @@ const creativeModelPolicySchema = new Schema(
       default: "local",
     },
     autoApproveEnabled: { type: Boolean, default: false },
+    requiredHumanReview: { type: Boolean, default: true },
+    commercialUseStatus: {
+      type: String,
+      enum: ["allowed", "review_required", "prohibited", "unknown"],
+      default: "review_required",
+    },
     maxBriefsPerJob: { type: Number, default: 20 },
     maxVariantsPerBrief: { type: Number, default: 4 },
     maxTotalAssetsPerJob: { type: Number, default: 40 },
@@ -585,13 +593,16 @@ const creativeModelPolicySchema = new Schema(
   { timestamps: true, collection: "ai_creative_model_policies" },
 );
 creativeModelPolicySchema.index({ policyId: 1, version: 1 }, { unique: true });
+// Multiple active policies allowed — one per (imageProvider, videoProvider) pair.
 creativeModelPolicySchema.index(
-  { status: 1 },
+  { status: 1, imageProvider: 1, videoProvider: 1 },
   {
     unique: true,
     partialFilterExpression: { status: "active" },
   },
 );
+creativeModelPolicySchema.index({ status: 1, imageProvider: 1 });
+creativeModelPolicySchema.index({ status: 1, videoProvider: 1 });
 
 export type CreativeModelPolicyDocument = InferSchemaType<
   typeof creativeModelPolicySchema

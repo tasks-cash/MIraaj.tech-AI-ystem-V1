@@ -21,6 +21,10 @@ export interface CreativeBriefRef {
   expectedText?: string;
   disclosureText?: string;
   assetHints?: string[];
+  conceptTitle?: string;
+  visualNarrative?: string;
+  requiredElements?: string[];
+  prohibitedElements?: string[];
 }
 
 export interface CreativeSourceContext {
@@ -79,6 +83,26 @@ function asBriefArray(
         : {}),
       ...(Array.isArray(record.assetHints)
         ? { assetHints: record.assetHints.filter((h): h is string => typeof h === "string") }
+        : {}),
+      ...(typeof record.conceptTitle === "string"
+        ? { conceptTitle: record.conceptTitle }
+        : {}),
+      ...(typeof record.visualNarrative === "string"
+        ? { visualNarrative: record.visualNarrative }
+        : {}),
+      ...(Array.isArray(record.requiredElements)
+        ? {
+            requiredElements: record.requiredElements.filter(
+              (h): h is string => typeof h === "string",
+            ),
+          }
+        : {}),
+      ...(Array.isArray(record.prohibitedElements)
+        ? {
+            prohibitedElements: record.prohibitedElements.filter(
+              (h): h is string => typeof h === "string",
+            ),
+          }
         : {}),
     };
   });

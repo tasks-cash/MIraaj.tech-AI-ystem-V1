@@ -107,10 +107,17 @@ Creative media generation from approved campaign packages (no publishing).
 | POST | `/api/admin/ai/creative/assets/:assetId/regenerate` |
 | GET | `/api/admin/ai/creative/rights/:rightsRecordId` |
 | GET | `/api/admin/ai/creative/providers` |
+| GET | `/api/admin/ai/creative/providers/status` |
+| POST | `/api/admin/ai/creative/providers/health-check` |
+| GET | `/api/admin/ai/creative/providers/usage` |
+| GET | `/api/admin/ai/creative/providers/jobs/:providerJobId/status` |
 | GET | `/api/admin/ai/creative/render-specifications` |
 
 See root `.env.example` / compose for `AI_CREATIVE_*`, `AI_IMAGE_*`, `AI_VIDEO_*`,
-`AI_RENDER_*`, and `CREATIVE_*` variables.
+`AI_RENDER_*`, `AI_PROVIDER_*`, and `CREATIVE_*` variables. Provider API keys
+(`AI_IMAGE_PROVIDER_API_KEY`, `AI_VIDEO_PROVIDER_API_KEY`) stay on **ai-service
+only** — never on Nest. `MEDIA_FETCH_ALLOWED_HOSTS` on ai-service should include
+OpenAI/Runway media hosts when live providers are enabled.
 
 ## Media limits
 

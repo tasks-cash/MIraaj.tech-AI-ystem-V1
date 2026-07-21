@@ -88,6 +88,28 @@ export const CREATIVE_PROVIDER_CAPABILITY_SEEDS = [
     notes: "Image generation disabled.",
   },
   {
+    capabilityId: "image-openai",
+    providerType: "image" as const,
+    providerName: "openai",
+    status: "active" as const,
+    supportedAssetTypes: CREATIVE_ASSET_TYPES.filter(
+      (type) =>
+        type.includes("image") ||
+        type.includes("thumbnail") ||
+        type.includes("banner") ||
+        type.includes("carousel") ||
+        type.includes("story_frame") ||
+        type.includes("mockup") ||
+        type.includes("infographic") ||
+        type.includes("poster"),
+    ),
+    supportedPlatforms: [...CAMPAIGN_PLATFORMS],
+    maxWidth: 4096,
+    maxHeight: 4096,
+    maxBytes: 52_428_800,
+    notes: "OpenAI image provider — commercial-use review required.",
+  },
+  {
     capabilityId: "video-mock",
     providerType: "video" as const,
     providerName: "mock",
@@ -116,6 +138,25 @@ export const CREATIVE_PROVIDER_CAPABILITY_SEEDS = [
     notes: "Video generation disabled.",
   },
   {
+    capabilityId: "video-runway",
+    providerType: "video" as const,
+    providerName: "runway",
+    status: "active" as const,
+    supportedAssetTypes: CREATIVE_ASSET_TYPES.filter(
+      (type) =>
+        type.includes("video") ||
+        type.includes("reel") ||
+        type === "short" ||
+        type.includes("graphic"),
+    ),
+    supportedPlatforms: [...CAMPAIGN_PLATFORMS],
+    maxWidth: 1920,
+    maxHeight: 1920,
+    maxDurationSeconds: 10,
+    maxBytes: 1_073_741_824,
+    notes: "Runway video provider — async generation; commercial-use review required.",
+  },
+  {
     capabilityId: "render-local",
     providerType: "render" as const,
     providerName: "local",
@@ -126,6 +167,7 @@ export const CREATIVE_PROVIDER_CAPABILITY_SEEDS = [
   },
 ];
 
+/** Default active policy keeps live providers off for safety. */
 export const CREATIVE_MODEL_POLICY_SEED = {
   policyId: "creative-model-policy",
   version: 1,
@@ -134,6 +176,8 @@ export const CREATIVE_MODEL_POLICY_SEED = {
   videoProvider: "disabled" as const,
   renderProvider: "local" as const,
   autoApproveEnabled: false,
+  requiredHumanReview: true,
+  commercialUseStatus: "review_required" as const,
   maxBriefsPerJob: 20,
   maxVariantsPerBrief: 4,
   maxTotalAssetsPerJob: 40,
@@ -143,6 +187,49 @@ export const CREATIVE_MODEL_POLICY_SEED = {
   complianceScoreMin: 0.95,
   publishedAt: new Date("2026-01-01T00:00:00.000Z"),
 };
+
+/** Active provider-specific policies — used when env/job selects openai/runway. */
+export const CREATIVE_MODEL_POLICY_SEEDS = [
+  CREATIVE_MODEL_POLICY_SEED,
+  {
+    policyId: "creative-model-policy-openai-v1",
+    version: 1,
+    status: "active" as const,
+    imageProvider: "openai" as const,
+    videoProvider: "disabled" as const,
+    renderProvider: "local" as const,
+    autoApproveEnabled: false,
+    requiredHumanReview: true,
+    commercialUseStatus: "review_required" as const,
+    maxBriefsPerJob: 20,
+    maxVariantsPerBrief: 4,
+    maxTotalAssetsPerJob: 40,
+    qualityHighMin: 0.88,
+    qualityReviewMin: 0.65,
+    brandScoreMin: 0.85,
+    complianceScoreMin: 0.95,
+    publishedAt: new Date("2026-01-01T00:00:00.000Z"),
+  },
+  {
+    policyId: "creative-model-policy-runway-v1",
+    version: 1,
+    status: "active" as const,
+    imageProvider: "disabled" as const,
+    videoProvider: "runway" as const,
+    renderProvider: "local" as const,
+    autoApproveEnabled: false,
+    requiredHumanReview: true,
+    commercialUseStatus: "review_required" as const,
+    maxBriefsPerJob: 20,
+    maxVariantsPerBrief: 4,
+    maxTotalAssetsPerJob: 40,
+    qualityHighMin: 0.88,
+    qualityReviewMin: 0.65,
+    brandScoreMin: 0.85,
+    complianceScoreMin: 0.95,
+    publishedAt: new Date("2026-01-01T00:00:00.000Z"),
+  },
+];
 
 export const CREATIVE_PROMPT_VERSION_SEEDS = CREATIVE_PROMPT_PURPOSES.map(
   (purpose, index) => {

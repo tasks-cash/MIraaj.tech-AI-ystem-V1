@@ -58,6 +58,8 @@ timestamp, request/correlation IDs, idempotency key, body SHA-256, signature).
 | POST | `/internal/v1/creative/render/thumbnail` |
 | POST | `/internal/v1/creative/validate-media` |
 | POST | `/internal/v1/creative/ocr-check` |
+| GET | `/internal/v1/creative/jobs/{providerJobId}/status` |
+| POST | `/internal/v1/creative/jobs/{providerJobId}/cancel` |
 | GET | `/internal/v1/creative/providers/status` |
 
 Media bytes are fetched from short-lived signed object URLs only. Hosts must be
@@ -140,22 +142,57 @@ This module never connects to MongoDB, never approves, and never publishes —
 NestJS owns those steps and should treat every response as a draft pending
 human review when `requiresReview` is `true`.
 
-## Creative media generation + rendering (Prompt 5)
+## Creative media generation + rendering (Prompt 5 / 5.1)
 
 `app/api/internal_creative.py` generates/renders creative media helpers for
 Nest creative jobs. Defaults keep commercial APIs offline.
 
-- `AI_IMAGE_PROVIDER=disabled` (default) / `mock`: disabled returns
+- `AI_IMAGE_PROVIDER=disabled` (default) / `mock` / `openai`: disabled returns
   `provider_unavailable` with **no fabricated commercial pixels**; mock
-  returns deterministic PNG via Pillow (no network).
-- `AI_VIDEO_PROVIDER=disabled` (default) / `mock`: same pattern; mock tries
-  OpenCV `VideoWriter` MP4, otherwise poster-frame PNGs + metadata.
+  returns deterministic PNG via Pillow (no network); openai uses the official
+  Images API (`/v1/images/generations`) when `AI_IMAGE_PROVIDER_API_KEY` is set.
+- `AI_VIDEO_PROVIDER=disabled` (default) / `mock` / `runway`: same pattern; mock
+  tries OpenCV MP4 / poster frames; runway submits `POST /v1/text_to_video` and
+  polls `GET /v1/tasks/{id}` (header `X-Runway-Version: 2024-11-06`).
 - `AI_RENDER_PROVIDER=local` (default) / `disabled`: local Pillow letterbox,
   metadata strip, LTR/RTL text overlay, WebVTT+SRT, thumbnails/previews, and
   OCR round-trip against Prompt 2 Tesseract when available.
+- Secrets stay in FastAPI only (`AI_IMAGE_PROVIDER_API_KEY`,
+  `AI_VIDEO_PROVIDER_API_KEY`). Empty keys are treated as unset. Selecting
+  openai/runway without a key fails settings validation outside `APP_ENV=test`.
 - `CREATIVE_MAX_*` / `CREATIVE_PROVIDER_DOWNLOAD_*` bound payload and SSRF-safe
-  signed-URL retrieves (`media_fetch` allowlist).
-- Readiness exposes `imageProvider`, `videoProvider`, `renderProvider`.
+  signed-URL retrieves (`media_fetch` allowlist). For live provider output
+  retrieval, extend `MEDIA_FETCH_ALLOWED_HOSTS` with
+  `api.openai.com`, `oaidalleapiprodscus.blob.core.windows.net`, and
+  `api.dev.runwayml.com` (no secrets in the allowlist).
+- Job helpers: `GET /internal/v1/creative/jobs/{providerJobId}/status`,
+  `POST /internal/v1/creative/jobs/{providerJobId}/cancel`.
+- Readiness exposes `imageProvider`, `videoProvider`, `renderProvider`
+  (misconfigured when openai/runway selected without a key).
+- Usage metadata is recorded when returned; costs are never fabricated
+  (`costUnknown=true` unless the provider reports a cost).
+
+### Controlled live smoke (costs money — never run in CI)
+
+```bash
+# Safe health (no spend)
+.venv/bin/python scripts/provider_smoke.py health
+
+# Live image — requires AI_PROVIDER_LIVE_SMOKE_TEST_ENABLED=true + OpenAI key
+.venv/bin/python scripts/provider_smoke.py smoke-image \
+  --campaign-package-id=<approved-id> \
+  --creative-brief-id=<approved-id> \
+  --confirm-live-provider-cost
+
+# Live video — requires AI_PROVIDER_LIVE_SMOKE_TEST_ENABLED=true + Runway key
+.venv/bin/python scripts/provider_smoke.py smoke-video \
+  --campaign-package-id=<approved-id> \
+  --creative-brief-id=<approved-id> \
+  --confirm-live-provider-cost
+```
+
+Without credentials the smoke commands report
+`NOT RUN — credentials not configured` instead of inventing success.
 
 This module never connects to MongoDB, never approves, and never publishes.
 
@@ -163,9 +200,12 @@ This module never connects to MongoDB, never approves, and never publishes.
 
 ```bash
 pnpm ai:test
+# or
+pnpm --filter @miraaj/ai-service test
 ```
 
-Automated tests never call the real Gemini API.
+Automated tests mock httpx (`MockTransport`) and never call real OpenAI or
+Runway APIs.
 
 ## Out of scope (later prompts)
 

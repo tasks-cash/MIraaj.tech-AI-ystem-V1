@@ -203,7 +203,7 @@ export class AiHealthService {
       ),
       withTimeout(
         CreativeProviderCapabilityModel.countDocuments({}).then((count) =>
-          count > 0 ? ({ version: 1 } as { version: number }) : null,
+          count > 0 ? ({ version: 1 }) : null,
         ),
         1_000,
         null,

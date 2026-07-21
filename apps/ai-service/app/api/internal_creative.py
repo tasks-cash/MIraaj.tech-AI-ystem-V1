@@ -2,7 +2,8 @@
 
 HMAC-only under ``/internal/v1/creative``. NestJS remains the sole authority
 over approval, rights, and MinIO persistence; these routes never connect to
-MongoDB and never call live commercial media APIs.
+MongoDB. Production providers (openai/runway) are used only when configured
+with API keys; automated tests keep them disabled and mock httpx.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from app.core.config import Settings, get_settings
 from app.models.creative_schemas import (
     CreateThumbnailInput,
     CreateThumbnailResponse,
+    CreativeJobStatusResponse,
     CreativeProviderStatusResponse,
     GenerateImageInput,
     GenerateImageResponse,
@@ -44,6 +46,7 @@ from app.services.creative.factory import (
     resolve_video_provider,
 )
 from app.services.creative.local_render import LocalMediaRenderingProvider
+from app.services.creative.secret_redaction import scrub_for_logs
 from app.services.media_fetch import MediaFetchError, fetch_signed_media
 
 router = APIRouter(prefix="/internal/v1/creative", tags=["internal-creative"])
@@ -167,13 +170,19 @@ async def generate_image(
 
     logger.info(
         "creative_generate_image_completed",
-        route=request.url.path,
-        provider=output.provider,
-        status=output.status,
-        job_id=output.jobId,
-        byte_length=output.media.byteLength if output.media else 0,
-        sha256=output.media.sha256 if output.media else None,
-        request_id=request.headers.get("x-miraaj-request-id"),
+        **scrub_for_logs(
+            {
+                "route": request.url.path,
+                "provider": output.provider,
+                "status": output.status,
+                "job_id": output.jobId,
+                "provider_job_id": output.providerJobId,
+                "byte_length": output.media.byteLength if output.media else 0,
+                "sha256": output.media.sha256 if output.media else None,
+                "safe_error_code": output.safeErrorCode,
+                "request_id": request.headers.get("x-miraaj-request-id"),
+            }
+        ),
     )
     return GenerateImageResponse(
         accepted=True,
@@ -208,14 +217,20 @@ async def generate_video(
 
     logger.info(
         "creative_generate_video_completed",
-        route=request.url.path,
-        provider=output.provider,
-        status=output.status,
-        job_id=output.jobId,
-        byte_length=output.media.byteLength if output.media else 0,
-        sha256=output.media.sha256 if output.media else None,
-        is_poster_fallback=bool(output.media and output.media.isPosterFrameFallback),
-        request_id=request.headers.get("x-miraaj-request-id"),
+        **scrub_for_logs(
+            {
+                "route": request.url.path,
+                "provider": output.provider,
+                "status": output.status,
+                "job_id": output.jobId,
+                "provider_job_id": output.providerJobId,
+                "byte_length": output.media.byteLength if output.media else 0,
+                "sha256": output.media.sha256 if output.media else None,
+                "is_poster_fallback": bool(output.media and output.media.isPosterFrameFallback),
+                "safe_error_code": output.safeErrorCode,
+                "request_id": request.headers.get("x-miraaj-request-id"),
+            }
+        ),
     )
     return GenerateVideoResponse(
         accepted=True,
@@ -435,30 +450,141 @@ async def ocr_check(request_body: OcrCheckInput, request: Request) -> OcrCheckRe
     )
 
 
+@router.get("/jobs/{provider_job_id}/status")
+async def provider_job_status(provider_job_id: str, request: Request) -> CreativeJobStatusResponse:
+    settings = _settings()
+    started = perf_counter()
+    # Prefer the video provider for async provider job IDs; fall back to image.
+    video = resolve_video_provider(settings)
+    image = resolve_image_provider(settings)
+    try:
+        if settings.AI_VIDEO_PROVIDER in {"runway", "mock"}:
+            output = await video.get_job_status(provider_job_id)
+        else:
+            output = await image.get_job_status(provider_job_id)
+    except RuntimeError:
+        return CreativeJobStatusResponse(
+            accepted=False,
+            errorCode=_PROVIDER_FAILED,
+            safeMessage="Provider job status unavailable.",
+            processingMs=max(0, round((perf_counter() - started) * 1_000)),
+        )
+
+    # Never echo outputUrl into logs.
+    logger.info(
+        "creative_provider_job_status",
+        **scrub_for_logs(
+            {
+                "route": request.url.path,
+                "provider": output.provider,
+                "status": output.status,
+                "provider_job_id": output.providerJobId or provider_job_id,
+                "safe_error_code": output.safeErrorCode,
+                "has_output_url": bool(output.outputUrl),
+                "request_id": request.headers.get("x-miraaj-request-id"),
+            }
+        ),
+    )
+    return CreativeJobStatusResponse(
+        accepted=True,
+        data=output,
+        processingMs=max(0, round((perf_counter() - started) * 1_000)),
+    )
+
+
+@router.post("/jobs/{provider_job_id}/cancel")
+async def provider_job_cancel(provider_job_id: str, request: Request) -> CreativeJobStatusResponse:
+    settings = _settings()
+    started = perf_counter()
+    video = resolve_video_provider(settings)
+    image = resolve_image_provider(settings)
+    try:
+        if settings.AI_VIDEO_PROVIDER in {"runway", "mock"}:
+            output = await video.cancel_job(provider_job_id)
+        else:
+            output = await image.cancel_job(provider_job_id)
+    except RuntimeError:
+        return CreativeJobStatusResponse(
+            accepted=False,
+            errorCode=_PROVIDER_FAILED,
+            safeMessage="Provider job cancel unavailable.",
+            processingMs=max(0, round((perf_counter() - started) * 1_000)),
+        )
+
+    logger.info(
+        "creative_provider_job_cancel",
+        **scrub_for_logs(
+            {
+                "route": request.url.path,
+                "provider": output.provider,
+                "status": output.status,
+                "provider_job_id": output.providerJobId or provider_job_id,
+                "safe_error_code": output.safeErrorCode,
+                "request_id": request.headers.get("x-miraaj-request-id"),
+            }
+        ),
+    )
+    return CreativeJobStatusResponse(
+        accepted=True,
+        data=output,
+        processingMs=max(0, round((perf_counter() - started) * 1_000)),
+    )
+
+
 @router.get("/providers/status")
 async def providers_status() -> CreativeProviderStatusResponse:
     settings = _settings()
-    image_enabled = settings.AI_IMAGE_PROVIDER == "mock"
-    video_enabled = settings.AI_VIDEO_PROVIDER == "mock"
+    image_active = settings.ai_image_provider_active
+    video_active = settings.ai_video_provider_active
     render_enabled = settings.AI_RENDER_PROVIDER == "local"
+
+    image_configured = (
+        settings.AI_IMAGE_PROVIDER in {"disabled", "mock"}
+        or settings.AI_IMAGE_PROVIDER_API_KEY is not None
+    )
+    video_configured = (
+        settings.AI_VIDEO_PROVIDER in {"disabled", "mock"}
+        or settings.AI_VIDEO_PROVIDER_API_KEY is not None
+    )
+
+    image_error: str | None = None
+    if settings.AI_IMAGE_PROVIDER == "disabled":
+        image_error = "CREATIVE_PROVIDER_DISABLED"
+    elif settings.AI_IMAGE_PROVIDER == "openai" and not image_configured:
+        image_error = "CREATIVE_PROVIDER_UNAVAILABLE"
+
+    video_error: str | None = None
+    if settings.AI_VIDEO_PROVIDER == "disabled":
+        video_error = "CREATIVE_PROVIDER_DISABLED"
+    elif settings.AI_VIDEO_PROVIDER == "runway" and not video_configured:
+        video_error = "CREATIVE_PROVIDER_UNAVAILABLE"
+
     return CreativeProviderStatusResponse(
         imageProvider=ProviderStatusBlock(
             provider=settings.AI_IMAGE_PROVIDER,
-            enabled=image_enabled,
-            configured=True,
-            model=(settings.AI_IMAGE_MODEL or None) if image_enabled else None,
+            enabled=image_active,
+            configured=image_configured,
+            model=(settings.AI_IMAGE_MODEL or None) if image_active else None,
             timeoutSeconds=settings.AI_IMAGE_PROVIDER_TIMEOUT_SECONDS,
             maxRetries=settings.AI_IMAGE_PROVIDER_MAX_RETRIES,
-            safeError=None if image_enabled else "CREATIVE_PROVIDER_DISABLED",
+            safeError=image_error,
+            usageTrackingEnabled=settings.AI_PROVIDER_USAGE_TRACKING_ENABLED,
+            liveSmokeTestEnabled=settings.AI_PROVIDER_LIVE_SMOKE_TEST_ENABLED,
+            concurrencyLimit=settings.AI_PROVIDER_MAX_ACTIVE_IMAGE_JOBS,
         ),
         videoProvider=ProviderStatusBlock(
             provider=settings.AI_VIDEO_PROVIDER,
-            enabled=video_enabled,
-            configured=True,
-            model=(settings.AI_VIDEO_MODEL or None) if video_enabled else None,
+            enabled=video_active,
+            configured=video_configured,
+            model=(settings.AI_VIDEO_MODEL or None) if video_active else None,
             timeoutSeconds=settings.AI_VIDEO_PROVIDER_TIMEOUT_SECONDS,
             maxRetries=settings.AI_VIDEO_PROVIDER_MAX_RETRIES,
-            safeError=None if video_enabled else "CREATIVE_PROVIDER_DISABLED",
+            safeError=video_error,
+            usageTrackingEnabled=settings.AI_PROVIDER_USAGE_TRACKING_ENABLED,
+            liveSmokeTestEnabled=settings.AI_PROVIDER_LIVE_SMOKE_TEST_ENABLED,
+            concurrencyLimit=settings.AI_PROVIDER_MAX_ACTIVE_VIDEO_JOBS,
+            pollIntervalSeconds=settings.AI_VIDEO_PROVIDER_POLL_INTERVAL_SECONDS,
+            maxPollAttempts=settings.AI_VIDEO_PROVIDER_MAX_POLL_ATTEMPTS,
         ),
         renderProvider=ProviderStatusBlock(
             provider=settings.AI_RENDER_PROVIDER,

@@ -1,5 +1,9 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { createLogger } from "@miraaj/shared-logging";
+import type {
+  CreativeImageProvider,
+  CreativeVideoProvider,
+} from "@miraaj/shared-types";
 import { loadEnvironment } from "../../../environment.js";
 import {
   CreativeModelPolicyModel,
@@ -10,6 +14,7 @@ import {
 } from "../models/creative.schema.js";
 import {
   CREATIVE_MODEL_POLICY_SEED,
+  CREATIVE_MODEL_POLICY_SEEDS,
   CREATIVE_PROMPT_VERSION_SEEDS,
   CREATIVE_PROVIDER_CAPABILITY_SEEDS,
   CREATIVE_RENDER_SPEC_SEEDS,
@@ -18,7 +23,7 @@ import {
 export interface CreativeSeedSummary {
   renderSpecsSeeded: number;
   providerCapabilitiesSeeded: number;
-  modelPolicyActivated: boolean;
+  modelPoliciesSeeded: number;
   promptVersionsSeeded: number;
 }
 
@@ -39,7 +44,7 @@ export class CreativeSeedService implements OnModuleInit {
     const summary: CreativeSeedSummary = {
       renderSpecsSeeded: await this.seedRenderSpecs(),
       providerCapabilitiesSeeded: await this.seedProviderCapabilities(),
-      modelPolicyActivated: await this.seedModelPolicy(),
+      modelPoliciesSeeded: await this.seedModelPolicies(),
       promptVersionsSeeded: await this.seedPromptVersions(),
     };
     this.logger.info(
@@ -49,14 +54,66 @@ export class CreativeSeedService implements OnModuleInit {
     return summary;
   }
 
+  /** Default (disabled) active policy for shared limits. */
   async getActiveModelPolicyOrThrow(): Promise<CreativeModelPolicyDocument> {
-    const policy = await CreativeModelPolicyModel.findOne({
-      status: "active",
-    }).lean();
+    const policy =
+      (await CreativeModelPolicyModel.findOne({
+        status: "active",
+        policyId: CREATIVE_MODEL_POLICY_SEED.policyId,
+      }).lean()) ??
+      (await CreativeModelPolicyModel.findOne({
+        status: "active",
+        imageProvider: "disabled",
+        videoProvider: "disabled",
+      }).lean());
     if (!policy) {
       throw new Error("Active creative model policy was not found.");
     }
     return policy;
+  }
+
+  /**
+   * Resolves the active policy for a selected provider pair.
+   * Live providers (openai/runway) require their dedicated active policy.
+   */
+  async getActiveModelPolicyForProviders(input: {
+    imageProvider: CreativeImageProvider;
+    videoProvider: CreativeVideoProvider;
+  }): Promise<CreativeModelPolicyDocument> {
+    if (input.imageProvider === "openai") {
+      const openaiPolicy = await CreativeModelPolicyModel.findOne({
+        status: "active",
+        imageProvider: "openai",
+      }).lean();
+      if (!openaiPolicy) {
+        throw new Error("Active OpenAI creative model policy was not found.");
+      }
+      if (input.videoProvider === "runway") {
+        const runwayPolicy = await CreativeModelPolicyModel.findOne({
+          status: "active",
+          videoProvider: "runway",
+        }).lean();
+        if (!runwayPolicy) {
+          throw new Error("Active Runway creative model policy was not found.");
+        }
+      }
+      return openaiPolicy;
+    }
+    if (input.videoProvider === "runway") {
+      const runwayPolicy = await CreativeModelPolicyModel.findOne({
+        status: "active",
+        videoProvider: "runway",
+      }).lean();
+      if (!runwayPolicy) {
+        throw new Error("Active Runway creative model policy was not found.");
+      }
+      return runwayPolicy;
+    }
+    return this.getActiveModelPolicyOrThrow();
+  }
+
+  async getCapabilityOrNull(capabilityId: string) {
+    return CreativeProviderCapabilityModel.findOne({ capabilityId }).lean();
   }
 
   private async seedRenderSpecs(): Promise<number> {
@@ -90,16 +147,20 @@ export class CreativeSeedService implements OnModuleInit {
     return seeded;
   }
 
-  private async seedModelPolicy(): Promise<boolean> {
-    const existing = await CreativeModelPolicyModel.findOne({
-      policyId: CREATIVE_MODEL_POLICY_SEED.policyId,
-      version: CREATIVE_MODEL_POLICY_SEED.version,
-    }).lean();
-    if (existing) {
-      return false;
+  private async seedModelPolicies(): Promise<number> {
+    let seeded = 0;
+    for (const policy of CREATIVE_MODEL_POLICY_SEEDS) {
+      const existing = await CreativeModelPolicyModel.findOne({
+        policyId: policy.policyId,
+        version: policy.version,
+      }).lean();
+      if (existing) {
+        continue;
+      }
+      await CreativeModelPolicyModel.create(policy);
+      seeded += 1;
     }
-    await CreativeModelPolicyModel.create(CREATIVE_MODEL_POLICY_SEED);
-    return true;
+    return seeded;
   }
 
   private async seedPromptVersions(): Promise<number> {

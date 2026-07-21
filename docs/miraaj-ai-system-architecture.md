@@ -981,10 +981,12 @@ reject/regenerate. Attempts are immutable; corrections create asset revisions.
 
 ### 30.3 Providers
 
-- `AI_IMAGE_PROVIDER` / `AI_VIDEO_PROVIDER`: `disabled` \| `mock`
+- `AI_IMAGE_PROVIDER`: `disabled` \| `mock` \| `openai` (default `disabled`)
+- `AI_VIDEO_PROVIDER`: `disabled` \| `mock` \| `runway` (default `disabled`)
 - `AI_RENDER_PROVIDER`: `local` \| `disabled`
 - Disabled: no fabricated commercial pixels; manual upload path remains
 - Mock: deterministic test assets only; no live commercial APIs in CI
+- Production adapters live only in FastAPI; API keys never enter NestJS
 - `CREATIVE_AUTO_APPROVE_ENABLED` must stay `false`
 
 ### 30.4 Admin API
@@ -999,3 +1001,45 @@ render specifications, and manual asset upload sessions. Permissions:
 Social OAuth/publishing, ad accounts, tracked links/QR, Tasks.cash, public asset
 URLs, voice cloning, deepfakes, celebrity likeness, public creative UI,
 `apps/web` changes.
+
+## 31. Prompt 5.1 — production image/video provider activation
+
+Prompt 5.1 activates optional production adapters behind the same Prompt 5
+contracts. Defaults remain offline.
+
+### 31.1 Adapters
+
+| Provider | Type | Official surface |
+| --- | --- | --- |
+| `openai` | Image | OpenAI Images API (`/v1/images/generations`) via httpx |
+| `runway` | Video | Runway API text-to-video + task polling via httpx |
+
+Models are selected via `AI_IMAGE_MODEL` / `AI_VIDEO_MODEL` and active model
+policies. Exact overlays/disclosures continue through local render + OCR.
+
+### 31.2 Secret boundary
+
+- Provider API keys exist only in the FastAPI process environment / ai-service
+  Compose service.
+- NestJS never receives provider keys.
+- Status APIs never return keys, prompts, or signed URLs.
+- Logs redact Authorization, API keys, and provider URLs.
+
+### 31.3 Controls
+
+- Capability + model-policy seeds for openai/runway
+- Concurrency budgets (`AI_PROVIDER_MAX_ACTIVE_IMAGE_JOBS` / `VIDEO`)
+- Optional cost caps without fabricating prices
+- Bounded video poll + persisted `providerJobId` for worker resume
+- Controlled live smoke: `AI_PROVIDER_LIVE_SMOKE_TEST_ENABLED` +
+  `--confirm-live-provider-cost`
+
+### 31.4 Smoke commands
+
+```bash
+pnpm ai:provider:health
+pnpm ai:provider:smoke:image -- --campaign-package-id=<id> --creative-brief-id=<id> --confirm-live-provider-cost
+pnpm ai:provider:smoke:video -- --campaign-package-id=<id> --creative-brief-id=<id> --confirm-live-provider-cost
+```
+
+Automated CI never spends money. Live smoke is `NOT RUN` without credentials.

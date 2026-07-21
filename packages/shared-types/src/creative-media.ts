@@ -249,10 +249,10 @@ export const AI_CREATIVE_JOB_NAMES = {
   BUILD_CREATIVE_JOB: "build-creative-job",
 } as const;
 
-export const CREATIVE_IMAGE_PROVIDERS = ["disabled", "mock"] as const;
+export const CREATIVE_IMAGE_PROVIDERS = ["disabled", "mock", "openai"] as const;
 export type CreativeImageProvider = (typeof CREATIVE_IMAGE_PROVIDERS)[number];
 
-export const CREATIVE_VIDEO_PROVIDERS = ["disabled", "mock"] as const;
+export const CREATIVE_VIDEO_PROVIDERS = ["disabled", "mock", "runway"] as const;
 export type CreativeVideoProvider = (typeof CREATIVE_VIDEO_PROVIDERS)[number];
 
 export const CREATIVE_RENDER_PROVIDERS = ["local", "disabled"] as const;

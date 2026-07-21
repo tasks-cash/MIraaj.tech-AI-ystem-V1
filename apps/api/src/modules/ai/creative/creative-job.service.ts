@@ -24,6 +24,7 @@ import {
   CreativeGenerationJobModel,
   type CreativeGenerationJobDocument,
 } from "../models/creative.schema.js";
+import { CreativeBudgetService } from "./creative-budget.service.js";
 import { CreativeSourceEligibilityService } from "./creative-source-eligibility.service.js";
 import { CreativeSeedService } from "./creative-seed.service.js";
 import { CreativeQueueService } from "../queue/creative-queue.service.js";
@@ -109,6 +110,8 @@ export class CreativeJobService {
     private readonly creativeSeed: CreativeSeedService,
     @Inject(CreativeQueueService)
     private readonly queue: CreativeQueueService,
+    @Inject(CreativeBudgetService)
+    private readonly budget: CreativeBudgetService,
   ) {}
 
   async createJob(input: CreateCreativeJobInput): Promise<Record<string, unknown>> {
@@ -126,7 +129,24 @@ export class CreativeJobService {
         : {}),
     });
 
-    const modelPolicy = await this.creativeSeed.getActiveModelPolicyOrThrow();
+    // Job preference wins; fall back to environment.
+    const imageProvider =
+      input.imageProviderPreference ?? this.environment.AI_IMAGE_PROVIDER;
+    const videoProvider =
+      input.videoProviderPreference ?? this.environment.AI_VIDEO_PROVIDER;
+
+    const modelPolicy =
+      await this.creativeSeed.getActiveModelPolicyForProviders({
+        imageProvider,
+        videoProvider,
+      });
+    if (modelPolicy.autoApproveEnabled) {
+      this.logger.warn(
+        { event: "ai.creative.policy.auto_approve_ignored" },
+        "Ignoring autoApproveEnabled on creative model policy",
+      );
+    }
+
     const briefCount = source.briefs.length;
     if (briefCount > this.environment.CREATIVE_MAX_BRIEFS_PER_JOB) {
       throw new BadRequestException({
@@ -158,24 +178,49 @@ export class CreativeJobService {
       });
     }
 
-    const imageProvider =
-      input.imageProviderPreference ??
-      (this.environment.AI_IMAGE_PROVIDER);
-    const videoProvider =
-      input.videoProviderPreference ??
-      (this.environment.AI_VIDEO_PROVIDER);
-
     const needsImage = input.selectedAssetTypes.some((type) =>
       IMAGE_ASSET_TYPES.has(type),
     );
     const needsVideo = input.selectedAssetTypes.some((type) =>
       VIDEO_ASSET_TYPES.has(type),
     );
-    if (needsImage && imageProvider === "disabled") {
-      // Allowed: worker will create provider_unavailable stubs instead of failing create.
+
+    if (needsImage && imageProvider === "openai") {
+      const capability = await this.creativeSeed.getCapabilityOrNull(
+        "image-openai",
+      );
+      if (!capability || capability.status !== "active") {
+        throw new BadRequestException({
+          code: "CREATIVE_PROVIDER_CAPABILITY_MISSING",
+          message:
+            "OpenAI image capability seed is missing or inactive. Reconcile creative seeds.",
+        });
+      }
     }
-    if (needsVideo && videoProvider === "disabled") {
-      // Allowed: worker will create provider_unavailable stubs instead of failing create.
+    if (needsVideo && videoProvider === "runway") {
+      const capability = await this.creativeSeed.getCapabilityOrNull(
+        "video-runway",
+      );
+      if (!capability || capability.status !== "active") {
+        throw new BadRequestException({
+          code: "CREATIVE_PROVIDER_CAPABILITY_MISSING",
+          message:
+            "Runway video capability seed is missing or inactive. Reconcile creative seeds.",
+        });
+      }
+    }
+
+    if (
+      (needsImage && (imageProvider === "openai" || imageProvider === "mock")) ||
+      (needsVideo && (videoProvider === "runway" || videoProvider === "mock"))
+    ) {
+      await this.budget.assertWithinConcurrencyLimits({
+        needsImage,
+        needsVideo,
+        imageProvider,
+        videoProvider,
+      });
+      await this.budget.assertCostBudget();
     }
 
     const briefIds = source.briefs.map((brief) => brief.briefId).sort();
@@ -261,7 +306,6 @@ export class CreativeJobService {
         ]),
       ],
       queuedAt: new Date(),
-      // Pin model policy version metadata without mutating auto-approve (always false).
       renderSpecVersion: modelPolicy.version,
     });
 

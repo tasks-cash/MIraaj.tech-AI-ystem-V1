@@ -15,9 +15,13 @@ SENSITIVE_KEYS = frozenset(
         "aiserviceinternalsecret",
         "adminapitoken",
         "geminiapikey",
+        "aiimageproviderapikey",
+        "aivideoproviderapikey",
         "mongodburi",
         "redisurl",
         "credentials",
+        "outputurl",
+        "signedmediaurl",
     }
 )
 

@@ -181,25 +181,61 @@ def translation_provider_readiness(settings: Settings | None = None) -> Dependen
 
 def image_provider_readiness(settings: Settings | None = None) -> DependencyResult:
     resolved_settings = settings if settings is not None else get_settings()
-    image_enabled = resolved_settings.AI_IMAGE_PROVIDER == "mock"
+    provider = resolved_settings.AI_IMAGE_PROVIDER
+    if provider == "disabled":
+        return {
+            "configured": True,
+            "required": False,
+            "healthy": True,
+            "latencyMs": 0,
+            "safeError": "IMAGE_PROVIDER_DISABLED",
+        }
+    if provider == "mock":
+        return {
+            "configured": True,
+            "required": False,
+            "healthy": True,
+            "latencyMs": 0,
+            "safeError": None,
+        }
+    # openai
+    key_ok = resolved_settings.AI_IMAGE_PROVIDER_API_KEY is not None
     return {
-        "configured": True,
+        "configured": key_ok,
         "required": False,
-        "healthy": True,
+        "healthy": key_ok,
         "latencyMs": 0,
-        "safeError": None if image_enabled else "IMAGE_PROVIDER_DISABLED",
+        "safeError": None if key_ok else "IMAGE_PROVIDER_MISCONFIGURED",
     }
 
 
 def video_provider_readiness(settings: Settings | None = None) -> DependencyResult:
     resolved_settings = settings if settings is not None else get_settings()
-    video_enabled = resolved_settings.AI_VIDEO_PROVIDER == "mock"
+    provider = resolved_settings.AI_VIDEO_PROVIDER
+    if provider == "disabled":
+        return {
+            "configured": True,
+            "required": False,
+            "healthy": True,
+            "latencyMs": 0,
+            "safeError": "VIDEO_PROVIDER_DISABLED",
+        }
+    if provider == "mock":
+        return {
+            "configured": True,
+            "required": False,
+            "healthy": True,
+            "latencyMs": 0,
+            "safeError": None,
+        }
+    # runway
+    key_ok = resolved_settings.AI_VIDEO_PROVIDER_API_KEY is not None
     return {
-        "configured": True,
+        "configured": key_ok,
         "required": False,
-        "healthy": True,
+        "healthy": key_ok,
         "latencyMs": 0,
-        "safeError": None if video_enabled else "VIDEO_PROVIDER_DISABLED",
+        "safeError": None if key_ok else "VIDEO_PROVIDER_MISCONFIGURED",
     }
 
 

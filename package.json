@@ -19,7 +19,10 @@
     "ai:install": "python3 -m venv apps/ai-service/.venv && apps/ai-service/.venv/bin/pip install --upgrade pip && apps/ai-service/.venv/bin/pip install -r apps/ai-service/requirements.lock.txt",
     "ai:test": "pnpm --filter @miraaj/ai-service test",
     "ai:format": "apps/ai-service/.venv/bin/ruff format apps/ai-service && apps/ai-service/.venv/bin/ruff check --fix apps/ai-service",
-    "ai:health": "curl --fail --silent http://127.0.0.1:8200/health && printf '\\n' && curl --fail --silent http://127.0.0.1:8200/ready && printf '\\n' && curl --fail --silent http://127.0.0.1:8200/version && printf '\\n'"
+    "ai:health": "curl --fail --silent http://127.0.0.1:8200/health && printf '\\n' && curl --fail --silent http://127.0.0.1:8200/ready && printf '\\n' && curl --fail --silent http://127.0.0.1:8200/version && printf '\\n'",
+    "ai:provider:health": "pnpm --filter @miraaj/ai-service provider:health",
+    "ai:provider:smoke:image": "pnpm --filter @miraaj/ai-service provider:smoke:image",
+    "ai:provider:smoke:video": "pnpm --filter @miraaj/ai-service provider:smoke:video"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

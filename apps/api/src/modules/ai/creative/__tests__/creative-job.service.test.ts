@@ -135,6 +135,14 @@ function baseCreateInput(
 async function loadJobService(options?: {
   source?: typeof approvedSource;
   env?: Record<string, string>;
+  budget?: {
+    assertWithinConcurrencyLimits?: () => Promise<void>;
+    assertCostBudget?: () => Promise<void>;
+  };
+  seed?: {
+    getActiveModelPolicyForProviders?: () => Promise<Record<string, unknown>>;
+    getCapabilityOrNull?: (id: string) => Promise<Record<string, unknown> | null>;
+  };
 }) {
   vi.resetModules();
   resetEnvironmentCache();
@@ -154,8 +162,25 @@ async function loadJobService(options?: {
     {
       getActiveModelPolicyOrThrow: () =>
         Promise.resolve({ version: 1, autoApproveEnabled: false }),
+      getActiveModelPolicyForProviders: () =>
+        options?.seed?.getActiveModelPolicyForProviders?.() ??
+        Promise.resolve({ version: 1, autoApproveEnabled: false }),
+      getCapabilityOrNull: (id: string) =>
+        options?.seed?.getCapabilityOrNull?.(id) ??
+        Promise.resolve(
+          id === "image-openai" || id === "video-runway"
+            ? { capabilityId: id, status: "active" }
+            : null,
+        ),
     } as never,
     { enqueueBuildCreativeJob: enqueue } as never,
+    {
+      assertWithinConcurrencyLimits:
+        options?.budget?.assertWithinConcurrencyLimits ??
+        (() => Promise.resolve()),
+      assertCostBudget:
+        options?.budget?.assertCostBudget ?? (() => Promise.resolve()),
+    } as never,
   );
   return { service, jobModel, enqueue };
 }
@@ -226,5 +251,59 @@ describe("Prompt 5 — CreativeJobService", () => {
     expect(result.status).toBe("queued");
     expect(result.imageProviderPreference).toBe("disabled");
     expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  it("rejects openai preference when capability seed is missing", async () => {
+    const { service } = await loadJobService({
+      seed: {
+        getCapabilityOrNull: () => Promise.resolve(null),
+      },
+    });
+    await expect(
+      service.createJob(
+        baseCreateInput({ imageProviderPreference: "openai" }),
+      ),
+    ).rejects.toMatchObject({
+      response: { code: "CREATIVE_PROVIDER_CAPABILITY_MISSING" },
+    });
+  });
+
+  it("rejects when concurrency budget is exceeded for openai", async () => {
+    const { BadRequestException } = await import("@nestjs/common");
+    const { service } = await loadJobService({
+      budget: {
+        assertWithinConcurrencyLimits: () =>
+          Promise.reject(
+            new BadRequestException({
+              code: "CREATIVE_GENERATION_LIMIT_EXCEEDED",
+              message: "Active image job limit reached.",
+            }),
+          ),
+      },
+    });
+    await expect(
+      service.createJob(
+        baseCreateInput({ imageProviderPreference: "openai" }),
+      ),
+    ).rejects.toMatchObject({
+      response: { code: "CREATIVE_GENERATION_LIMIT_EXCEEDED" },
+    });
+  });
+
+  it("keeps requiresReview true and ignores autoApprove on policy", async () => {
+    const { service, jobModel } = await loadJobService({
+      seed: {
+        getActiveModelPolicyForProviders: () =>
+          Promise.resolve({
+            version: 1,
+            autoApproveEnabled: true,
+          }),
+      },
+    });
+    const result = await service.createJob(
+      baseCreateInput({ imageProviderPreference: "openai" }),
+    );
+    expect(result.requiresReview).toBe(true);
+    expect(jobModel.size()).toBe(1);
   });
 });

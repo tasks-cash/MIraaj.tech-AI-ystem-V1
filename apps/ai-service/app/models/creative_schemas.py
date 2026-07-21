@@ -48,6 +48,24 @@ class GenerateImageInput(BaseModel):
     seed: int | None = Field(default=None, ge=0, le=2_147_483_647)
     jobId: str | None = Field(default=None, max_length=128)
     briefId: str | None = Field(default=None, max_length=128)
+    conceptTitle: str | None = Field(default=None, max_length=200)
+    visualNarrative: str | None = Field(default=None, max_length=2_000)
+    requiredElements: list[str] = Field(default_factory=list, max_length=20)
+    prohibitedElements: list[str] = Field(default_factory=list, max_length=20)
+    brandPlacement: str | None = Field(default=None, max_length=500)
+    complianceNotes: str | None = Field(default=None, max_length=2_000)
+
+    @field_validator("requiredElements", "prohibitedElements", mode="before")
+    @classmethod
+    def _bound_element_strings(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        clipped: list[str] = []
+        for item in value[:20]:
+            text = str(item).strip()[:200]
+            if text:
+                clipped.append(text)
+        return clipped
 
 
 class GenerateVideoInput(BaseModel):
@@ -183,6 +201,24 @@ class GeneratedMediaArtifact(BaseModel):
     posterFramesBase64: list[str] = Field(default_factory=list, max_length=30)
 
 
+class ProviderUsageMetadata(BaseModel):
+    """Normalized provider usage — never invents prices."""
+
+    model_config = _strict_config()
+
+    provider: str
+    model: str | None = None
+    providerJobId: str | None = None
+    requestedVariants: int | None = None
+    generatedVariants: int | None = None
+    requestedDurationSeconds: float | None = None
+    generatedDurationSeconds: float | None = None
+    providerReportedUsage: dict[str, object] | None = None
+    providerReportedCost: float | None = None
+    currency: str | None = Field(default=None, max_length=8)
+    costUnknown: bool = True
+
+
 class GenerateImageOutput(BaseModel):
     model_config = _strict_config()
 
@@ -190,10 +226,14 @@ class GenerateImageOutput(BaseModel):
     model: str | None = None
     status: CreativeJobStatus
     jobId: str | None = None
+    providerJobId: str | None = None
     media: GeneratedMediaArtifact | None = None
+    outputUrl: str | None = Field(default=None, max_length=2_048)
     requiresReview: bool = True
     reviewReasonCodes: list[str] = Field(default_factory=list, max_length=30)
     safeError: CreativeErrorCode | None = None
+    safeErrorCode: str | None = Field(default=None, max_length=64)
+    usage: ProviderUsageMetadata | None = None
     processingMs: int = 0
 
 
@@ -204,10 +244,14 @@ class GenerateVideoOutput(BaseModel):
     model: str | None = None
     status: CreativeJobStatus
     jobId: str | None = None
+    providerJobId: str | None = None
     media: GeneratedMediaArtifact | None = None
+    outputUrl: str | None = Field(default=None, max_length=2_048)
     requiresReview: bool = True
     reviewReasonCodes: list[str] = Field(default_factory=list, max_length=30)
     safeError: CreativeErrorCode | None = None
+    safeErrorCode: str | None = Field(default=None, max_length=64)
+    usage: ProviderUsageMetadata | None = None
     processingMs: int = 0
 
 
@@ -217,8 +261,12 @@ class CreativeJobStatusOutput(BaseModel):
     jobId: str
     status: CreativeJobStatus
     provider: str
+    providerJobId: str | None = None
     safeError: CreativeErrorCode | None = None
+    safeErrorCode: str | None = Field(default=None, max_length=64)
     media: GeneratedMediaArtifact | None = None
+    outputUrl: str | None = Field(default=None, max_length=2_048)
+    usage: ProviderUsageMetadata | None = None
 
 
 class RenderedMediaArtifact(BaseModel):
@@ -335,6 +383,11 @@ class ProviderStatusBlock(BaseModel):
     timeoutSeconds: int | None = None
     maxRetries: int | None = None
     safeError: str | None = None
+    usageTrackingEnabled: bool | None = None
+    liveSmokeTestEnabled: bool | None = None
+    concurrencyLimit: int | None = None
+    pollIntervalSeconds: int | None = None
+    maxPollAttempts: int | None = None
 
 
 class CreativeProviderStatusResponse(BaseModel):
@@ -343,6 +396,16 @@ class CreativeProviderStatusResponse(BaseModel):
     imageProvider: ProviderStatusBlock
     videoProvider: ProviderStatusBlock
     renderProvider: ProviderStatusBlock
+
+
+class CreativeJobStatusResponse(BaseModel):
+    model_config = _strict_config()
+
+    accepted: bool
+    data: CreativeJobStatusOutput | None = None
+    errorCode: str | None = None
+    safeMessage: str | None = None
+    processingMs: int = 0
 
 
 class CreativeAcceptedResponse(BaseModel):

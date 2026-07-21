@@ -54,6 +54,8 @@ import { CreativeQualityService } from "./creative/creative-quality.service.js";
 import { CreativeJobService } from "./creative/creative-job.service.js";
 import { CreativeReviewService } from "./creative/creative-review.service.js";
 import { CreativeStorageService } from "./creative/creative-storage.service.js";
+import { CreativeBudgetService } from "./creative/creative-budget.service.js";
+import { CreativeUsageService } from "./creative/creative-usage.service.js";
 import { CreativeController } from "./creative/creative.controller.js";
 import { AuditEventService } from "./audit/audit-event.service.js";
 import { AuditEventsController } from "./audit/audit-events.controller.js";
@@ -120,6 +122,8 @@ import { AuditEventsController } from "./audit/audit-events.controller.js";
     CreativeJobService,
     CreativeReviewService,
     CreativeStorageService,
+    CreativeBudgetService,
+    CreativeUsageService,
     CreativeWorkerService,
     AuditEventService,
   ],

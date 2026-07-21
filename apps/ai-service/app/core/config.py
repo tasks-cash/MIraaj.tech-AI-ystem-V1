@@ -1,6 +1,9 @@
-from functools import lru_cache
+from __future__ import annotations
 
-from pydantic import Field, SecretStr, field_validator
+from functools import lru_cache
+from urllib.parse import urlparse
+
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_OCR_PACKS = (
@@ -88,18 +91,32 @@ class Settings(BaseSettings):
     AI_TRANSLATION_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=600)
     AI_TRANSLATION_MAX_RETRIES: int = Field(default=1, ge=0, le=5)
 
-    # Prompt 5 — creative image/video generation + local render. Defaults keep
-    # providers offline (disabled/mock only; no live commercial media APIs).
-    AI_IMAGE_PROVIDER: str = Field(default="disabled", pattern="^(disabled|mock)$")
+    # Prompt 5 / 5.1 — creative image/video generation + local render.
+    # Defaults keep commercial APIs offline (disabled|mock).
+    AI_IMAGE_PROVIDER: str = Field(default="disabled", pattern="^(disabled|mock|openai)$")
     AI_IMAGE_MODEL: str = ""
+    AI_IMAGE_PROVIDER_API_KEY: SecretStr | None = None
+    AI_IMAGE_PROVIDER_BASE_URL: str = "https://api.openai.com"
     AI_IMAGE_PROVIDER_TIMEOUT_SECONDS: int = Field(default=300, ge=5, le=1_800)
     AI_IMAGE_PROVIDER_MAX_RETRIES: int = Field(default=2, ge=0, le=5)
-    AI_VIDEO_PROVIDER: str = Field(default="disabled", pattern="^(disabled|mock)$")
+    AI_IMAGE_PROVIDER_MAX_VARIANTS: int = Field(default=4, ge=1, le=8)
+    AI_VIDEO_PROVIDER: str = Field(default="disabled", pattern="^(disabled|mock|runway)$")
     AI_VIDEO_MODEL: str = ""
-    AI_VIDEO_PROVIDER_TIMEOUT_SECONDS: int = Field(default=900, ge=5, le=3_600)
+    AI_VIDEO_PROVIDER_API_KEY: SecretStr | None = None
+    AI_VIDEO_PROVIDER_BASE_URL: str = "https://api.dev.runwayml.com"
+    AI_VIDEO_PROVIDER_TIMEOUT_SECONDS: int = Field(default=1_200, ge=5, le=3_600)
     AI_VIDEO_PROVIDER_MAX_RETRIES: int = Field(default=2, ge=0, le=5)
+    AI_VIDEO_PROVIDER_POLL_INTERVAL_SECONDS: int = Field(default=10, ge=5, le=120)
+    AI_VIDEO_PROVIDER_MAX_POLL_ATTEMPTS: int = Field(default=120, ge=1, le=600)
     AI_RENDER_PROVIDER: str = Field(default="local", pattern="^(local|disabled)$")
     AI_RENDER_TIMEOUT_SECONDS: int = Field(default=600, ge=5, le=3_600)
+    AI_PROVIDER_LIVE_SMOKE_TEST_ENABLED: bool = False
+    AI_PROVIDER_USAGE_TRACKING_ENABLED: bool = True
+    AI_PROVIDER_MAX_ACTIVE_IMAGE_JOBS: int = Field(default=2, ge=1, le=50)
+    AI_PROVIDER_MAX_ACTIVE_VIDEO_JOBS: int = Field(default=1, ge=1, le=20)
+    AI_PROVIDER_DAILY_COST_LIMIT: str = ""
+    AI_PROVIDER_JOB_COST_LIMIT: str = ""
+    AI_PROVIDER_MONTHLY_COST_LIMIT: str = ""
     CREATIVE_MAX_IMAGE_BYTES: int = Field(default=52_428_800, ge=1_024)
     CREATIVE_MAX_VIDEO_BYTES: int = Field(default=1_073_741_824, ge=1_024)
     CREATIVE_MAX_VIDEO_DURATION_SECONDS: int = Field(default=600, ge=1, le=3_600)
@@ -124,6 +141,49 @@ class Settings(BaseSettings):
         if value == "" or value is None:
             return None
         return value
+
+    @field_validator(
+        "AI_IMAGE_PROVIDER_API_KEY",
+        "AI_VIDEO_PROVIDER_API_KEY",
+        mode="before",
+    )
+    @classmethod
+    def empty_provider_keys_to_none(cls, value: object) -> object:
+        if value == "" or value is None:
+            return None
+        return value
+
+    @field_validator(
+        "AI_IMAGE_PROVIDER_BASE_URL",
+        "AI_VIDEO_PROVIDER_BASE_URL",
+        mode="before",
+    )
+    @classmethod
+    def validate_provider_base_url(cls, value: object) -> object:
+        if value is None or value == "":
+            return value
+        text = str(value).strip()
+        parsed = urlparse(text)
+        if parsed.scheme not in {"http", "https"}:
+            raise ValueError("Provider base URL must use http or https.")
+        if parsed.username or parsed.password:
+            raise ValueError("Provider base URL must not embed credentials.")
+        if not parsed.hostname:
+            raise ValueError("Provider base URL host is missing.")
+        return text.rstrip("/")
+
+    @model_validator(mode="after")
+    def require_keys_for_live_providers(self) -> Settings:
+        # Fail closed outside tests when a live provider is selected without a key.
+        # Tests keep providers disabled by default; APP_ENV=test allows intentional
+        # misconfiguration fixtures for readiness checks.
+        if self.APP_ENV == "test":
+            return self
+        if self.AI_IMAGE_PROVIDER == "openai" and self.AI_IMAGE_PROVIDER_API_KEY is None:
+            raise ValueError("AI_IMAGE_PROVIDER_API_KEY is required when AI_IMAGE_PROVIDER=openai")
+        if self.AI_VIDEO_PROVIDER == "runway" and self.AI_VIDEO_PROVIDER_API_KEY is None:
+            raise ValueError("AI_VIDEO_PROVIDER_API_KEY is required when AI_VIDEO_PROVIDER=runway")
+        return self
 
     @property
     def allowed_service_ids(self) -> frozenset[str]:
@@ -175,11 +235,35 @@ class Settings(BaseSettings):
 
     @property
     def ai_image_provider_active(self) -> bool:
-        return self.AI_IMAGE_PROVIDER == "mock"
+        if self.AI_IMAGE_PROVIDER == "mock":
+            return True
+        if self.AI_IMAGE_PROVIDER == "openai":
+            return self.AI_IMAGE_PROVIDER_API_KEY is not None
+        return False
 
     @property
     def ai_video_provider_active(self) -> bool:
-        return self.AI_VIDEO_PROVIDER == "mock"
+        if self.AI_VIDEO_PROVIDER == "mock":
+            return True
+        if self.AI_VIDEO_PROVIDER == "runway":
+            return self.AI_VIDEO_PROVIDER_API_KEY is not None
+        return False
+
+    @property
+    def ai_image_provider_live_allowed(self) -> bool:
+        return (
+            self.AI_IMAGE_PROVIDER == "openai"
+            and self.AI_IMAGE_PROVIDER_API_KEY is not None
+            and (self.APP_ENV != "test")
+        )
+
+    @property
+    def ai_video_provider_live_allowed(self) -> bool:
+        return (
+            self.AI_VIDEO_PROVIDER == "runway"
+            and self.AI_VIDEO_PROVIDER_API_KEY is not None
+            and (self.APP_ENV != "test")
+        )
 
     @property
     def ai_render_provider_active(self) -> bool:

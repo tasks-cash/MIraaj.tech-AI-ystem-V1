@@ -377,6 +377,47 @@ export class AiInternalClientService {
     });
   }
 
+  async getCreativeProviderJobStatus(
+    providerJobId: string,
+    providerType: "runway" | "openai" | "mock",
+    input?: { requestId?: string; correlationId?: string },
+  ): Promise<Record<string, unknown>> {
+    const encoded = encodeURIComponent(providerJobId);
+    return this.requestJson<Record<string, unknown>>({
+      method: "GET",
+      path: `/internal/v1/creative/jobs/${encoded}/status?provider=${encodeURIComponent(providerType)}`,
+      timeoutMs:
+        providerType === "runway" || providerType === "mock"
+          ? loadEnvironment().AI_VIDEO_PROVIDER_TIMEOUT_SECONDS * 1_000
+          : loadEnvironment().AI_IMAGE_PROVIDER_TIMEOUT_SECONDS * 1_000,
+      ...input,
+    });
+  }
+
+  async cancelCreativeProviderJob(
+    providerJobId: string,
+    input?: {
+      requestId?: string;
+      correlationId?: string;
+      idempotencyKey?: string;
+      providerType?: "runway" | "openai" | "mock";
+    },
+  ): Promise<Record<string, unknown>> {
+    const encoded = encodeURIComponent(providerJobId);
+    const provider = input?.providerType
+      ? `?provider=${encodeURIComponent(input.providerType)}`
+      : "";
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: `/internal/v1/creative/jobs/${encoded}/cancel${provider}`,
+      body: {},
+      timeoutMs: loadEnvironment().AI_VIDEO_PROVIDER_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `creative-cancel-${randomUUID()}`,
+      ...(input?.requestId ? { requestId: input.requestId } : {}),
+      ...(input?.correlationId ? { correlationId: input.correlationId } : {}),
+    });
+  }
+
   private async requestJson<T>(input: {
     method: "GET" | "POST";
     path: string;

@@ -43,8 +43,8 @@ CreativeAssetType = Literal[
     "preview_video",
 ]
 
-CreativeImageProviderId = Literal["disabled", "mock"]
-CreativeVideoProviderId = Literal["disabled", "mock"]
+CreativeImageProviderId = Literal["disabled", "mock", "openai"]
+CreativeVideoProviderId = Literal["disabled", "mock", "runway"]
 CreativeRenderProviderId = Literal["local", "disabled"]
 
 TextDirection = Literal["ltr", "rtl"]

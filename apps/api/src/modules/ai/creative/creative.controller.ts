@@ -14,12 +14,14 @@ import type { CreativeReviewStatus } from "@miraaj/shared-types";
 import { AdminAuthGuard } from "../guards/admin-auth.guard.js";
 import { AiPermissionGuard } from "../guards/ai-permission.guard.js";
 import { RequireAiPermission } from "../decorators/require-ai-permission.decorator.js";
+import { AiInternalClientService } from "../ai-internal-client.service.js";
 import {
   CreativeJobService,
   type CreateCreativeJobInput,
 } from "./creative-job.service.js";
 import { CreativeReviewService } from "./creative-review.service.js";
 import { CreativeSeedService } from "./creative-seed.service.js";
+import { CreativeUsageService } from "./creative-usage.service.js";
 import { CreativeQueueService } from "../queue/creative-queue.service.js";
 import {
   AssetRightsRecordModel,
@@ -40,6 +42,10 @@ export class CreativeController {
     private readonly creativeSeedService: CreativeSeedService,
     @Inject(CreativeQueueService)
     private readonly creativeQueueService: CreativeQueueService,
+    @Inject(AiInternalClientService)
+    private readonly aiClient: AiInternalClientService,
+    @Inject(CreativeUsageService)
+    private readonly creativeUsageService: CreativeUsageService,
   ) {}
 
   @Post("jobs")
@@ -186,12 +192,74 @@ export class CreativeController {
   @Get("providers")
   @RequireAiPermission(AI_PERMISSIONS.CREATIVE_PROVIDERS_READ)
   async listProviders() {
-    const [capabilities, policy, queueStats] = await Promise.all([
+    const [capabilities, policies, queueStats] = await Promise.all([
       CreativeProviderCapabilityModel.find().lean(),
-      CreativeModelPolicyModel.findOne({ status: "active" }).lean(),
+      CreativeModelPolicyModel.find({ status: "active" }).lean(),
       this.creativeQueueService.getQueueStats(),
     ]);
-    return { capabilities, policy, queueStats };
+    return { capabilities, policies, queueStats };
+  }
+
+  @Get("providers/status")
+  @RequireAiPermission(AI_PERMISSIONS.CREATIVE_PROVIDERS_READ)
+  async providersStatus() {
+    const [capabilities, policies, remote] = await Promise.all([
+      CreativeProviderCapabilityModel.find().lean(),
+      CreativeModelPolicyModel.find({ status: "active" })
+        .select({
+          policyId: 1,
+          status: 1,
+          imageProvider: 1,
+          videoProvider: 1,
+          autoApproveEnabled: 1,
+          requiredHumanReview: 1,
+          commercialUseStatus: 1,
+        })
+        .lean(),
+      this.aiClient.getCreativeProvidersStatus().catch(() => ({
+        accepted: false,
+        safeError: "AI service status unavailable",
+      })),
+    ]);
+    return {
+      capabilities: capabilities.map((cap) => ({
+        capabilityId: cap.capabilityId,
+        providerType: cap.providerType,
+        providerName: cap.providerName,
+        status: cap.status,
+        notes: cap.notes,
+      })),
+      policies,
+      remote,
+    };
+  }
+
+  @Post("providers/health-check")
+  @RequireAiPermission(AI_PERMISSIONS.CREATIVE_PROVIDERS_READ)
+  async providersHealthCheck() {
+    return this.aiClient.getCreativeProvidersStatus();
+  }
+
+  @Get("providers/usage")
+  @RequireAiPermission(AI_PERMISSIONS.CREATIVE_PROVIDERS_READ)
+  async providersUsage() {
+    return this.creativeUsageService.aggregateSafeUsage();
+  }
+
+  @Get("providers/jobs/:providerJobId/status")
+  @RequireAiPermission(AI_PERMISSIONS.CREATIVE_PROVIDERS_READ)
+  async providerJobStatus(
+    @Param("providerJobId") providerJobId: string,
+    @Query("provider") provider?: string,
+  ) {
+    const providerType =
+      provider === "openai" || provider === "runway" || provider === "mock"
+        ? provider
+        : "runway";
+    return this.aiClient.getCreativeProviderJobStatus(
+      providerJobId,
+      providerType,
+    );
   }
 
   @Get("render-specifications")

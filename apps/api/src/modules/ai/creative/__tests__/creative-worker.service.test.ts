@@ -184,10 +184,12 @@ async function loadWorker(input: {
   job: FakeJobRecord;
   source?: ReturnType<typeof dentalSource> | PromiseLike<never>;
   eligibilityReject?: Error;
+  env?: Record<string, string>;
+  videoGenerateResponse?: Record<string, unknown>;
 }) {
   vi.resetModules();
   resetEnvironmentCache();
-  Object.assign(process.env, baseEnv);
+  Object.assign(process.env, baseEnv, input.env ?? {});
 
   const jobModel = makeJobModel(input.job);
   const attemptCollector = makeCollector();
@@ -227,21 +229,43 @@ async function loadWorker(input: {
     "../creative-quality.service.js"
   );
 
+  const putBinaryObject = vi.fn().mockResolvedValue(undefined);
+  const aiClient = {
+    postCreativeGenerateImage: vi.fn().mockResolvedValue({
+      accepted: true,
+      data: {
+        provider: "openai",
+        status: "completed",
+        media: {
+          contentBase64: Buffer.from("fake-png").toString("base64"),
+          mimeType: "image/png",
+        },
+        usage: { provider: "openai", costUnknown: true },
+        requiresReview: true,
+      },
+    }),
+    postCreativeGenerateVideo: vi.fn().mockResolvedValue(
+      input.videoGenerateResponse ?? { ok: true },
+    ),
+    postCreativeValidateMedia: vi.fn().mockResolvedValue({ ok: true }),
+    postCreativeOcrCheck: vi
+      .fn()
+      .mockResolvedValue({ ocrText: "Modern dental clinic systems" }),
+    postCreativeRenderTextOverlay: vi.fn().mockResolvedValue({ ok: true }),
+    postCreativeRenderSubtitles: vi.fn().mockResolvedValue({ ok: true }),
+    getCreativeProviderJobStatus: vi.fn().mockResolvedValue({
+      accepted: true,
+      data: { status: "provider_pending", provider: "runway" },
+    }),
+    cancelCreativeProviderJob: vi.fn().mockResolvedValue({ accepted: true }),
+  };
+
   const worker = new CreativeWorkerService(
     {
       moveToDeadLetter: vi.fn(),
       enqueueBuildCreativeJob: vi.fn(),
     } as never,
-    {
-      postCreativeGenerateImage: vi.fn().mockResolvedValue({ ok: true }),
-      postCreativeGenerateVideo: vi.fn().mockResolvedValue({ ok: true }),
-      postCreativeValidateMedia: vi.fn().mockResolvedValue({ ok: true }),
-      postCreativeOcrCheck: vi
-        .fn()
-        .mockResolvedValue({ ocrText: "Modern dental clinic systems" }),
-      postCreativeRenderTextOverlay: vi.fn().mockResolvedValue({ ok: true }),
-      postCreativeRenderSubtitles: vi.fn().mockResolvedValue({ ok: true }),
-    } as never,
+    aiClient as never,
     eligibility as never,
     new CreativeValidationService(),
     new CreativeQualityService(),
@@ -249,7 +273,16 @@ async function loadWorker(input: {
       bucket: "miraaj-test",
       buildAssetObjectKey: () => "creative/assets/x.png",
       buildVariantObjectKey: () => "creative/variants/x.png",
-      putBinaryObject: vi.fn().mockResolvedValue(undefined),
+      putBinaryObject,
+    } as never,
+    {
+      assertWithinConcurrencyLimits: vi.fn().mockResolvedValue(undefined),
+      assertCostBudget: vi.fn().mockResolvedValue(undefined),
+      assertJobCostLimit: vi.fn(),
+    } as never,
+    {
+      recordAttemptUsage: vi.fn().mockResolvedValue(undefined),
+      recordAssetUsage: vi.fn().mockResolvedValue(undefined),
     } as never,
   );
 
@@ -258,6 +291,8 @@ async function loadWorker(input: {
     jobModel,
     assetCollector,
     rightsCollector,
+    aiClient,
+    putBinaryObject,
     process: () =>
       (worker as unknown as { process: (job: { data: unknown }) => Promise<void> }).process({
         data: {
@@ -409,5 +444,119 @@ describe("Prompt 5 — CreativeWorkerService scenarios", () => {
     await process();
     expect(rightsCollector.items[0]?.status).toBe("unknown");
     expect(rightsCollector.items[0]?.ownershipType).toBe("unknown");
+  });
+
+  it("openai path stores base64 media and never auto-approves", async () => {
+    const { process, jobModel, assetCollector, rightsCollector, aiClient, putBinaryObject } =
+      await loadWorker({
+        job: makeJobRecord({ imageProviderPreference: "openai" }),
+        source: dentalSource({
+          briefs: [
+            {
+              briefId: "img-1",
+              briefType: "image",
+              conceptTitle: "Clinic exterior",
+              visualNarrative: "Modern dental storefront",
+              requiredElements: ["Miraaj.tech branding"],
+              prohibitedElements: ["fake awards"],
+              textOverlay: "Book a consult",
+            },
+          ],
+        }),
+      });
+    await process();
+    expect(aiClient.postCreativeGenerateImage).toHaveBeenCalledOnce();
+    const body = aiClient.postCreativeGenerateImage.mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(body.prompt).toContain("Clinic exterior");
+    expect(body.prompt).toContain("Miraaj.tech");
+    expect(body.prompt).not.toContain("Book a consult");
+    expect(putBinaryObject).toHaveBeenCalled();
+    expect(assetCollector.items[0]?.requiresReview).toBe(true);
+    expect(assetCollector.items[0]?.status).toBe("awaiting_review");
+    expect(rightsCollector.items[0]?.ownershipType).toBe("provider_generated");
+    expect(rightsCollector.items[0]?.status).toBe("review_required");
+    expect(jobModel.snapshot().status).toBe("awaiting_review");
+  });
+
+  it("runway pending poll leaves provider_pending then completes on status", async () => {
+    const { process, assetCollector, aiClient } = await loadWorker({
+      job: makeJobRecord({
+        imageProviderPreference: "disabled",
+        videoProviderPreference: "runway",
+        selectedAssetTypes: ["short_video"],
+        selectedBriefIds: ["vid-1"],
+      }),
+      env: {
+        AI_VIDEO_PROVIDER_POLL_INTERVAL_SECONDS: "1",
+        AI_VIDEO_PROVIDER_MAX_POLL_ATTEMPTS: "1",
+      },
+      videoGenerateResponse: {
+        accepted: true,
+        data: {
+          provider: "runway",
+          status: "provider_pending",
+          providerJobId: "rw-job-1",
+          usage: { provider: "runway", costUnknown: true },
+          requiresReview: true,
+        },
+      },
+      source: dentalSource({
+        briefs: [
+          {
+            briefId: "vid-1",
+            briefType: "video",
+            conceptTitle: "Clinic walkthrough",
+            visualNarrative: "Short operational video",
+          },
+        ],
+      }),
+    });
+
+    aiClient.getCreativeProviderJobStatus.mockResolvedValue({
+      accepted: true,
+      data: {
+        status: "completed",
+        provider: "runway",
+        media: {
+          contentBase64: Buffer.from("fake-mp4").toString("base64"),
+          mimeType: "video/mp4",
+        },
+      },
+    });
+
+    await process();
+
+    expect(aiClient.postCreativeGenerateVideo).toHaveBeenCalled();
+    expect(aiClient.getCreativeProviderJobStatus).toHaveBeenCalledWith(
+      "rw-job-1",
+      "runway",
+    );
+    expect(assetCollector.items[0]?.requiresReview).toBe(true);
+    expect(assetCollector.items[0]?.status).toBe("awaiting_review");
+    expect(assetCollector.items[0]?.providerJobId).toBe("rw-job-1");
+  });
+
+  it("runway failure surfaces CREATIVE_PROVIDER_JOB_FAILED", async () => {
+    const { process, jobModel, aiClient } = await loadWorker({
+      job: makeJobRecord({
+        imageProviderPreference: "disabled",
+        videoProviderPreference: "runway",
+        selectedAssetTypes: ["short_video"],
+        selectedBriefIds: ["vid-1"],
+      }),
+      videoGenerateResponse: {
+        accepted: false,
+        errorCode: "CREATIVE_PROVIDER_JOB_FAILED",
+      },
+      source: dentalSource({
+        briefs: [{ briefId: "vid-1", briefType: "video" }],
+      }),
+    });
+    await expect(process()).rejects.toThrow(/Runway video provider failed/);
+    expect(aiClient.postCreativeGenerateVideo).toHaveBeenCalled();
+    expect(jobModel.snapshot().status).toBe("failed");
   });
 });

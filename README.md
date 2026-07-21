@@ -24,6 +24,16 @@ docker compose up -d --build
 BullMQ workers run inside the NestJS API process (media, intelligence, campaigns,
 creative generation).
 
+Production image (`openai`) and video (`runway`) adapters run only inside the
+FastAPI AI service. Provider API keys must never be passed to the NestJS API
+container. See [docs/creative-provider-activation.md](docs/creative-provider-activation.md).
+
+```bash
+pnpm ai:provider:health
+```
+
+Live smoke tests are opt-in and disabled by default.
+
 ### Optional legacy web profile
 
 The `web` service is gated behind the Compose profile `web` and does not start by
