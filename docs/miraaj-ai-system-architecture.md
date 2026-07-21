@@ -951,3 +951,51 @@ provider response retention remains off by default.
 Protected system status reports logging subsystem state, last successful log
 emission, audit persistence state, dropped/failed write counters, and
 trace/metrics exporter state.
+
+## 30. Prompt 5 — creative media generation, validation and rendering
+
+Prompt 5 converts **approved** Prompt 4 campaign packages (image/video/carousel/
+story briefs) into privately stored draft creative assets. NestJS owns
+eligibility, orchestration, validation authority, rights, human review, and
+final approval. FastAPI owns image/video/render provider abstractions, secure
+retrieval, normalization, overlays, subtitles, and OCR helpers. Auto-approve
+and auto-publish remain disabled.
+
+### 30.1 Ownership
+
+| Layer | Responsibility |
+| --- | --- |
+| NestJS `apps/api` | Source eligibility, jobs, assets, variants, rights, queues, review, admin APIs |
+| FastAPI `apps/ai-service` | Disabled/mock image & video providers, local render, SSRF-safe fetch, OCR check |
+| MongoDB | Jobs, attempts, assets, variants, reviews, rights, render specs, capabilities, model policies, prompts |
+| Redis | BullMQ `miraaj.ai.creative-generation` (+ DLQ), locks, progress |
+| MinIO | Private `creative/{source,normalized,rendered,previews,thumbnails,subtitles,provenance,validation}/...` |
+
+### 30.2 Pipeline
+
+Approved campaign package → pin revision/briefs/policies → generation job →
+provider generate (or `provider_unavailable` when disabled) → retrieve/validate →
+normalize → render platform variants + overlays/subtitles → OCR text check →
+quality/compliance/rights scores → `awaiting_review` → human approve/correct/
+reject/regenerate. Attempts are immutable; corrections create asset revisions.
+
+### 30.3 Providers
+
+- `AI_IMAGE_PROVIDER` / `AI_VIDEO_PROVIDER`: `disabled` \| `mock`
+- `AI_RENDER_PROVIDER`: `local` \| `disabled`
+- Disabled: no fabricated commercial pixels; manual upload path remains
+- Mock: deterministic test assets only; no live commercial APIs in CI
+- `CREATIVE_AUTO_APPROVE_ENABLED` must stay `false`
+
+### 30.4 Admin API
+
+Protected `/api/admin/ai/creative/*` for jobs, assets, review, rights, providers,
+render specifications, and manual asset upload sessions. Permissions:
+`ai.creativeJobs.*`, `ai.creativeAssets.*`, `ai.creativeManualAssets.*`,
+`ai.creativeRights.*`, `ai.creativeProviders.*`, `ai.renderSpecifications.*`.
+
+### 30.5 Out of scope
+
+Social OAuth/publishing, ad accounts, tracked links/QR, Tasks.cash, public asset
+URLs, voice cloning, deepfakes, celebrity likeness, public creative UI,
+`apps/web` changes.

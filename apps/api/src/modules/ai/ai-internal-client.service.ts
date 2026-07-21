@@ -264,6 +264,119 @@ export class AiInternalClientService {
     });
   }
 
+  /**
+   * Optional creative media providers. NestJS owns eligibility, rights, review,
+   * and approval — FastAPI only generates/renders/validates media bytes.
+   */
+  async postCreativeGenerateImage(
+    body: Record<string, unknown>,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/internal/v1/creative/generate-image",
+      body,
+      timeoutMs: loadEnvironment().AI_IMAGE_PROVIDER_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `creative-image-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async postCreativeGenerateVideo(
+    body: Record<string, unknown>,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/internal/v1/creative/generate-video",
+      body,
+      timeoutMs: loadEnvironment().AI_VIDEO_PROVIDER_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `creative-video-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async postCreativeRenderImageVariant(
+    body: Record<string, unknown>,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/internal/v1/creative/render/image-variant",
+      body,
+      timeoutMs: loadEnvironment().AI_RENDER_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `creative-render-image-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async postCreativeRenderTextOverlay(
+    body: Record<string, unknown>,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/internal/v1/creative/render/text-overlay",
+      body,
+      timeoutMs: loadEnvironment().AI_RENDER_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `creative-overlay-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async postCreativeRenderSubtitles(
+    body: Record<string, unknown>,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/internal/v1/creative/render/subtitles",
+      body,
+      timeoutMs: loadEnvironment().AI_RENDER_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `creative-subtitles-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async postCreativeValidateMedia(
+    body: Record<string, unknown>,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/internal/v1/creative/validate-media",
+      body,
+      timeoutMs: loadEnvironment().AI_RENDER_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `creative-validate-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async postCreativeOcrCheck(
+    body: Record<string, unknown>,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/internal/v1/creative/ocr-check",
+      body,
+      timeoutMs: loadEnvironment().MEDIA_OCR_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `creative-ocr-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async getCreativeProvidersStatus(input?: {
+    requestId?: string;
+    correlationId?: string;
+  }): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "GET",
+      path: "/internal/v1/creative/providers/status",
+      ...input,
+    });
+  }
+
   private async requestJson<T>(input: {
     method: "GET" | "POST";
     path: string;

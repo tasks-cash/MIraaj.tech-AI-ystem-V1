@@ -44,10 +44,14 @@ permissions.
 - `miraaj.ai.media.dead-letter`
 - `miraaj.ai.intelligence`
 - `miraaj.ai.intelligence.dead-letter`
+- `miraaj.ai.campaigns`
+- `miraaj.ai.campaigns.dead-letter`
+- `miraaj.ai.creative-generation`
+- `miraaj.ai.creative-generation.dead-letter`
 
 Workers run in-process with `MEDIA_WORKER_CONCURRENCY` /
-`AI_INTELLIGENCE_WORKER_CONCURRENCY` and stale-job recovery for both media and
-intelligence jobs.
+`AI_INTELLIGENCE_WORKER_CONCURRENCY` / `AI_CAMPAIGN_WORKER_CONCURRENCY` /
+`AI_CREATIVE_WORKER_CONCURRENCY` and stale-job recovery.
 
 ## Prompt 3 admin endpoints
 
@@ -83,6 +87,31 @@ Business intelligence and Miraaj.tech service matching (no campaign generation).
 See root `.env.example` for `AI_INTELLIGENCE_*`, `AI_REASONING_*`, and
 `SERVICE_MATCH_*` variables.
 
+## Prompt 5 admin endpoints
+
+Creative media generation from approved campaign packages (no publishing).
+`CREATIVE_AUTO_APPROVE_ENABLED` remains false; all assets require human review.
+
+| Method | Path |
+| --- | --- |
+| POST | `/api/admin/ai/creative/jobs` |
+| GET | `/api/admin/ai/creative/jobs` |
+| GET | `/api/admin/ai/creative/jobs/:creativeJobId` |
+| POST | `/api/admin/ai/creative/jobs/:creativeJobId/retry` |
+| POST | `/api/admin/ai/creative/jobs/:creativeJobId/cancel` |
+| GET | `/api/admin/ai/creative/assets` |
+| GET | `/api/admin/ai/creative/assets/:assetId` |
+| POST | `/api/admin/ai/creative/assets/:assetId/review` |
+| POST | `/api/admin/ai/creative/assets/:assetId/approve` |
+| POST | `/api/admin/ai/creative/assets/:assetId/reject` |
+| POST | `/api/admin/ai/creative/assets/:assetId/regenerate` |
+| GET | `/api/admin/ai/creative/rights/:rightsRecordId` |
+| GET | `/api/admin/ai/creative/providers` |
+| GET | `/api/admin/ai/creative/render-specifications` |
+
+See root `.env.example` / compose for `AI_CREATIVE_*`, `AI_IMAGE_*`, `AI_VIDEO_*`,
+`AI_RENDER_*`, and `CREATIVE_*` variables.
+
 ## Media limits
 
 See root `.env.example` for `MEDIA_*`, `CONFIDENCE_*`, and `BULLMQ_*` variables.
@@ -102,5 +131,4 @@ pnpm --filter @miraaj/api test
 
 ## Out of scope
 
-Public upload UI, campaign generation, social publishing, Tasks.cash, billing,
-and speech/video.
+Public upload UI, social publishing, Tasks.cash, billing, and speech.

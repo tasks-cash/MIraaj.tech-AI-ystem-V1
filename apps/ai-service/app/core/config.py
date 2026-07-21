@@ -88,6 +88,24 @@ class Settings(BaseSettings):
     AI_TRANSLATION_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=600)
     AI_TRANSLATION_MAX_RETRIES: int = Field(default=1, ge=0, le=5)
 
+    # Prompt 5 — creative image/video generation + local render. Defaults keep
+    # providers offline (disabled/mock only; no live commercial media APIs).
+    AI_IMAGE_PROVIDER: str = Field(default="disabled", pattern="^(disabled|mock)$")
+    AI_IMAGE_MODEL: str = ""
+    AI_IMAGE_PROVIDER_TIMEOUT_SECONDS: int = Field(default=300, ge=5, le=1_800)
+    AI_IMAGE_PROVIDER_MAX_RETRIES: int = Field(default=2, ge=0, le=5)
+    AI_VIDEO_PROVIDER: str = Field(default="disabled", pattern="^(disabled|mock)$")
+    AI_VIDEO_MODEL: str = ""
+    AI_VIDEO_PROVIDER_TIMEOUT_SECONDS: int = Field(default=900, ge=5, le=3_600)
+    AI_VIDEO_PROVIDER_MAX_RETRIES: int = Field(default=2, ge=0, le=5)
+    AI_RENDER_PROVIDER: str = Field(default="local", pattern="^(local|disabled)$")
+    AI_RENDER_TIMEOUT_SECONDS: int = Field(default=600, ge=5, le=3_600)
+    CREATIVE_MAX_IMAGE_BYTES: int = Field(default=52_428_800, ge=1_024)
+    CREATIVE_MAX_VIDEO_BYTES: int = Field(default=1_073_741_824, ge=1_024)
+    CREATIVE_MAX_VIDEO_DURATION_SECONDS: int = Field(default=600, ge=1, le=3_600)
+    CREATIVE_MAX_PROVIDER_DOWNLOAD_BYTES: int = Field(default=1_073_741_824, ge=1_024)
+    CREATIVE_PROVIDER_DOWNLOAD_TIMEOUT_SECONDS: int = Field(default=300, ge=5, le=1_800)
+
     @field_validator("LOG_LEVEL", mode="before")
     @classmethod
     def normalize_log_level(cls, value: object) -> str:
@@ -154,6 +172,18 @@ class Settings(BaseSettings):
     @property
     def ai_translation_provider_active(self) -> bool:
         return self.AI_TRANSLATION_PROVIDER == "gemini" and self.GEMINI_API_KEY is not None
+
+    @property
+    def ai_image_provider_active(self) -> bool:
+        return self.AI_IMAGE_PROVIDER == "mock"
+
+    @property
+    def ai_video_provider_active(self) -> bool:
+        return self.AI_VIDEO_PROVIDER == "mock"
+
+    @property
+    def ai_render_provider_active(self) -> bool:
+        return self.AI_RENDER_PROVIDER == "local"
 
 
 @lru_cache

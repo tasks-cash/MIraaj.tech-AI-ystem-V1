@@ -25,6 +25,8 @@ export interface StructuredLogEnvelope {
   analysisJobId?: string;
   intelligenceJobId?: string;
   campaignJobId?: string;
+  generationJobId?: string;
+  creativeAssetId?: string;
   attemptId?: string;
   durationMs?: number;
   outcome?: LogOutcome;
@@ -159,6 +161,8 @@ export function buildStructuredLog(
     ...(input.analysisJobId ? { analysisJobId: input.analysisJobId } : {}),
     ...(input.intelligenceJobId ? { intelligenceJobId: input.intelligenceJobId } : {}),
     ...(input.campaignJobId ? { campaignJobId: input.campaignJobId } : {}),
+    ...(input.generationJobId ? { generationJobId: input.generationJobId } : {}),
+    ...(input.creativeAssetId ? { creativeAssetId: input.creativeAssetId } : {}),
     ...(input.attemptId ? { attemptId: input.attemptId } : {}),
     ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
     ...(input.outcome ? { outcome: input.outcome } : {}),

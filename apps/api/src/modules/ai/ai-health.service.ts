@@ -18,8 +18,16 @@ import { IntelligenceQueueService } from "./queue/intelligence-queue.service.js"
 import { StaleJobService } from "./queue/stale-job.service.js";
 import { CampaignQueueService } from "./queue/campaign-queue.service.js";
 import { CampaignSeedService } from "./campaigns/campaign-seed.service.js";
+import { CreativeQueueService } from "./queue/creative-queue.service.js";
+import { CreativeSeedService } from "./creative/creative-seed.service.js";
 import { AuditEventService } from "./audit/audit-event.service.js";
 import { CampaignJobModel, CampaignPackageModel } from "./models/campaign.schema.js";
+import {
+  CreativeAssetModel,
+  CreativeGenerationJobModel,
+  CreativeProviderCapabilityModel,
+  CreativeRenderSpecificationModel,
+} from "./models/creative.schema.js";
 import {
   AiServiceTimeoutError,
   AiServiceUnavailableError,
@@ -52,6 +60,10 @@ export class AiHealthService {
     private readonly campaignQueue: CampaignQueueService,
     @Inject(CampaignSeedService)
     private readonly campaignSeed: CampaignSeedService,
+    @Inject(CreativeQueueService)
+    private readonly creativeQueue: CreativeQueueService,
+    @Inject(CreativeSeedService)
+    private readonly creativeSeed: CreativeSeedService,
     @Inject(AuditEventService)
     private readonly auditEvents: AuditEventService,
   ) {}
@@ -80,6 +92,9 @@ export class AiHealthService {
       campaignQueueStats,
       awaitingReviewCampaignJobs,
       awaitingReviewCampaignPackages,
+      creativeQueueStats,
+      awaitingReviewCreativeJobs,
+      awaitingReviewCreativeAssets,
     ] = await Promise.all([
       this.infrastructure.dependencyStatus(),
       this.mediaQueue.getQueueStats(),
@@ -142,6 +157,24 @@ export class AiHealthService {
         1_000,
         0,
       ),
+      withTimeout(
+        this.creativeQueue.getQueueStats(),
+        1_000,
+        {
+          creative: { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0 },
+          deadLetter: { waiting: 0, active: 0, completed: 0, failed: 0 },
+        },
+      ),
+      withTimeout(
+        CreativeGenerationJobModel.countDocuments({ status: "awaiting_review" }),
+        1_000,
+        0,
+      ),
+      withTimeout(
+        CreativeAssetModel.countDocuments({ status: "awaiting_review" }),
+        1_000,
+        0,
+      ),
     ]);
 
     const [
@@ -150,12 +183,36 @@ export class AiHealthService {
       activePlatformPolicy,
       activeCompliancePolicy,
       activeGlossary,
+      activeCreativeModelPolicy,
+      activeRenderSpec,
+      activeProviderCapability,
+      quarantinedCreativeAssets,
     ] = await Promise.all([
       this.campaignSeed.getActiveBrandProfileOrThrow().catch(() => null),
       this.campaignSeed.getActiveCampaignPolicyOrThrow().catch(() => null),
       this.campaignSeed.getActivePlatformPolicyOrThrow().catch(() => null),
       this.campaignSeed.getActiveCompliancePolicyOrThrow().catch(() => null),
       this.campaignSeed.getActiveGlossaryOrThrow().catch(() => null),
+      this.creativeSeed.getActiveModelPolicyOrThrow().catch(() => null),
+      withTimeout(
+        CreativeRenderSpecificationModel.findOne({ status: "active" })
+          .sort({ version: -1 })
+          .lean() as Promise<{ version: number } | null>,
+        1_000,
+        null,
+      ),
+      withTimeout(
+        CreativeProviderCapabilityModel.findOne({ status: "active" })
+          .sort({ version: -1 })
+          .lean() as Promise<{ version: number } | null>,
+        1_000,
+        null,
+      ),
+      withTimeout(
+        CreativeAssetModel.countDocuments({ status: "quarantined" }),
+        1_000,
+        0,
+      ),
     ]);
     const minio = await this.checkMinio();
     const dlqFailed = await this.intelligenceQueue.deadLetterQueue
@@ -214,6 +271,21 @@ export class AiHealthService {
       awaitingReviewJobs: awaitingReviewCampaignJobs,
       awaitingReviewPackages: awaitingReviewCampaignPackages,
     };
+    const creativeBlock: AiSystemStatus["creative"] = {
+      queue: creativeQueueStats.creative,
+      deadLetter: creativeQueueStats.deadLetter,
+      workerConcurrency: environment.AI_CREATIVE_WORKER_CONCURRENCY,
+      imageProvider: environment.AI_IMAGE_PROVIDER,
+      videoProvider: environment.AI_VIDEO_PROVIDER,
+      renderProvider: environment.AI_RENDER_PROVIDER,
+      autoApproveEnabled: false,
+      modelPolicyVersion: activeCreativeModelPolicy?.version ?? null,
+      renderSpecVersion: activeRenderSpec?.version ?? null,
+      providerCapabilityVersion: activeProviderCapability?.version ?? null,
+      awaitingReviewJobs: awaitingReviewCreativeJobs,
+      awaitingReviewAssets: awaitingReviewCreativeAssets,
+      quarantinedAssets: quarantinedCreativeAssets,
+    };
     const loggingBlock: AiSystemStatus["logging"] = {
       subsystemState: "ready",
       lastSuccessfulLogEmission: new Date().toISOString(),
@@ -262,6 +334,7 @@ export class AiHealthService {
           reconciledRecently: staleCount,
         },
         campaigns: campaignsBlock,
+        creative: creativeBlock,
         logging: loggingBlock,
         error: null,
       };
@@ -301,6 +374,7 @@ export class AiHealthService {
           reconciledRecently: staleCount,
         },
         campaigns: campaignsBlock,
+        creative: creativeBlock,
         logging: loggingBlock,
         error: safe,
       };

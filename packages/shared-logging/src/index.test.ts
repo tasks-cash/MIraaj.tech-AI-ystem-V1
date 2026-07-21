@@ -27,6 +27,21 @@ describe("shared logging observability", () => {
     expect(envelope.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it("includes creative generation identifiers when provided", () => {
+    const envelope = buildStructuredLog({
+      level: "info",
+      event: "ai.creative.job.created",
+      service: "miraaj-api",
+      module: "creative",
+      environment: "test",
+      generationJobId: "gen-1",
+      creativeAssetId: "asset-1",
+      outcome: "success",
+    });
+    expect(envelope.generationJobId).toBe("gen-1");
+    expect(envelope.creativeAssetId).toBe("asset-1");
+  });
+
   it("redacts authorization headers and presigned URLs", () => {
     const redacted = redactSensitiveText(
       "Authorization: Bearer secret-token https://minio/bucket/file?X-Amz-Signature=abc",

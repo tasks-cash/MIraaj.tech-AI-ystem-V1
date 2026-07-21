@@ -45,11 +45,26 @@ import { CampaignReviewService } from "./campaigns/campaign-review.service.js";
 import { BrandProfileService } from "./campaigns/brand-profile.service.js";
 import { CampaignPolicyService } from "./campaigns/campaign-policy.service.js";
 import { CampaignController } from "./campaigns/campaign.controller.js";
+import { CreativeQueueModule } from "./queue/creative-queue.module.js";
+import { CreativeWorkerService } from "./creative/creative-worker.service.js";
+import { CreativeSeedService } from "./creative/creative-seed.service.js";
+import { CreativeSourceEligibilityService } from "./creative/creative-source-eligibility.service.js";
+import { CreativeValidationService } from "./creative/creative-validation.service.js";
+import { CreativeQualityService } from "./creative/creative-quality.service.js";
+import { CreativeJobService } from "./creative/creative-job.service.js";
+import { CreativeReviewService } from "./creative/creative-review.service.js";
+import { CreativeStorageService } from "./creative/creative-storage.service.js";
+import { CreativeController } from "./creative/creative.controller.js";
 import { AuditEventService } from "./audit/audit-event.service.js";
 import { AuditEventsController } from "./audit/audit-events.controller.js";
 
 @Module({
-  imports: [MediaQueueModule, IntelligenceQueueModule, CampaignQueueModule],
+  imports: [
+    MediaQueueModule,
+    IntelligenceQueueModule,
+    CampaignQueueModule,
+    CreativeQueueModule,
+  ],
   controllers: [
     AiController,
     UploadSessionController,
@@ -60,6 +75,7 @@ import { AuditEventsController } from "./audit/audit-events.controller.js";
     BusinessProfileController,
     RecommendationController,
     CampaignController,
+    CreativeController,
     AuditEventsController,
   ],
   providers: [
@@ -97,6 +113,14 @@ import { AuditEventsController } from "./audit/audit-events.controller.js";
     CampaignWorkerService,
     BrandProfileService,
     CampaignPolicyService,
+    CreativeSeedService,
+    CreativeSourceEligibilityService,
+    CreativeValidationService,
+    CreativeQualityService,
+    CreativeJobService,
+    CreativeReviewService,
+    CreativeStorageService,
+    CreativeWorkerService,
     AuditEventService,
   ],
   exports: [
@@ -106,6 +130,7 @@ import { AuditEventsController } from "./audit/audit-events.controller.js";
     MediaQueueModule,
     IntelligenceQueueModule,
     CampaignQueueModule,
+    CreativeQueueModule,
     CatalogService,
   ],
 })

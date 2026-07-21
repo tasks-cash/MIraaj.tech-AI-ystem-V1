@@ -128,6 +128,9 @@ def media_dependency_readiness() -> dict[str, DependencyResult]:
         "intelligenceProvider": intelligence_provider_readiness(settings),
         "campaignProvider": campaign_provider_readiness(settings),
         "translationProvider": translation_provider_readiness(settings),
+        "imageProvider": image_provider_readiness(settings),
+        "videoProvider": video_provider_readiness(settings),
+        "renderProvider": render_provider_readiness(settings),
     }
 
 
@@ -173,6 +176,46 @@ def translation_provider_readiness(settings: Settings | None = None) -> Dependen
         "safeError": None
         if translation_configured or not translation_enabled
         else "TRANSLATION_PROVIDER_DISABLED",
+    }
+
+
+def image_provider_readiness(settings: Settings | None = None) -> DependencyResult:
+    resolved_settings = settings if settings is not None else get_settings()
+    image_enabled = resolved_settings.AI_IMAGE_PROVIDER == "mock"
+    return {
+        "configured": True,
+        "required": False,
+        "healthy": True,
+        "latencyMs": 0,
+        "safeError": None if image_enabled else "IMAGE_PROVIDER_DISABLED",
+    }
+
+
+def video_provider_readiness(settings: Settings | None = None) -> DependencyResult:
+    resolved_settings = settings if settings is not None else get_settings()
+    video_enabled = resolved_settings.AI_VIDEO_PROVIDER == "mock"
+    return {
+        "configured": True,
+        "required": False,
+        "healthy": True,
+        "latencyMs": 0,
+        "safeError": None if video_enabled else "VIDEO_PROVIDER_DISABLED",
+    }
+
+
+def render_provider_readiness(settings: Settings | None = None) -> DependencyResult:
+    resolved_settings = settings if settings is not None else get_settings()
+    render_local = resolved_settings.AI_RENDER_PROVIDER == "local"
+    pillow_ok = _module_available("PIL")
+    healthy = (render_local and pillow_ok) or not render_local
+    return {
+        "configured": True,
+        "required": False,
+        "healthy": healthy,
+        "latencyMs": 0,
+        "safeError": None
+        if healthy
+        else ("UNAVAILABLE" if render_local else "RENDER_PROVIDER_DISABLED"),
     }
 
 

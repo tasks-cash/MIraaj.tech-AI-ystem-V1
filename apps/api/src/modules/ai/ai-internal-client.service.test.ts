@@ -190,6 +190,16 @@ describe("AI health service", () => {
         getActiveGlossaryOrThrow: () => Promise.reject(new Error("not found")),
       } as never,
       {
+        getQueueStats: () =>
+          Promise.resolve({
+            creative: { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0 },
+            deadLetter: { waiting: 0, active: 0, completed: 0, failed: 0 },
+          }),
+      } as never,
+      {
+        getActiveModelPolicyOrThrow: () => Promise.reject(new Error("not found")),
+      } as never,
+      {
         getStatus: () => ({
           state: "ready",
           droppedAuditWrites: 0,

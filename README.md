@@ -21,7 +21,8 @@ docker compose up -d --build
 - MongoDB (loopback): `localhost:27020`
 - Redis (loopback): `localhost:6383`
 
-BullMQ workers run inside the NestJS API process (media, intelligence, campaigns).
+BullMQ workers run inside the NestJS API process (media, intelligence, campaigns,
+creative generation).
 
 ### Optional legacy web profile
 

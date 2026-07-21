@@ -50,6 +50,15 @@ timestamp, request/correlation IDs, idempotency key, body SHA-256, signature).
 | POST | `/internal/v1/campaigns/quality-check` |
 | POST | `/internal/v1/campaigns/compliance-check` |
 | GET | `/internal/v1/campaigns/providers/status` |
+| POST | `/internal/v1/creative/generate-image` |
+| POST | `/internal/v1/creative/generate-video` |
+| POST | `/internal/v1/creative/render/image-variant` |
+| POST | `/internal/v1/creative/render/text-overlay` |
+| POST | `/internal/v1/creative/render/subtitles` |
+| POST | `/internal/v1/creative/render/thumbnail` |
+| POST | `/internal/v1/creative/validate-media` |
+| POST | `/internal/v1/creative/ocr-check` |
+| GET | `/internal/v1/creative/providers/status` |
 
 Media bytes are fetched from short-lived signed object URLs only. Hosts must be
 listed in `MEDIA_FETCH_ALLOWED_HOSTS`. Redirects and arbitrary URLs are rejected.
@@ -130,6 +139,25 @@ structured drafts and safety signals.
 This module never connects to MongoDB, never approves, and never publishes —
 NestJS owns those steps and should treat every response as a draft pending
 human review when `requiresReview` is `true`.
+
+## Creative media generation + rendering (Prompt 5)
+
+`app/api/internal_creative.py` generates/renders creative media helpers for
+Nest creative jobs. Defaults keep commercial APIs offline.
+
+- `AI_IMAGE_PROVIDER=disabled` (default) / `mock`: disabled returns
+  `provider_unavailable` with **no fabricated commercial pixels**; mock
+  returns deterministic PNG via Pillow (no network).
+- `AI_VIDEO_PROVIDER=disabled` (default) / `mock`: same pattern; mock tries
+  OpenCV `VideoWriter` MP4, otherwise poster-frame PNGs + metadata.
+- `AI_RENDER_PROVIDER=local` (default) / `disabled`: local Pillow letterbox,
+  metadata strip, LTR/RTL text overlay, WebVTT+SRT, thumbnails/previews, and
+  OCR round-trip against Prompt 2 Tesseract when available.
+- `CREATIVE_MAX_*` / `CREATIVE_PROVIDER_DOWNLOAD_*` bound payload and SSRF-safe
+  signed-URL retrieves (`media_fetch` allowlist).
+- Readiness exposes `imageProvider`, `videoProvider`, `renderProvider`.
+
+This module never connects to MongoDB, never approves, and never publishes.
 
 ## Tests
 

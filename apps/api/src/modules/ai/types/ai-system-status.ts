@@ -80,6 +80,21 @@ export interface AiSystemStatus {
     awaitingReviewJobs: number;
     awaitingReviewPackages: number;
   };
+  creative: {
+    queue: QueueCountSnapshot;
+    deadLetter: QueueCountSnapshot;
+    workerConcurrency: number;
+    imageProvider: string;
+    videoProvider: string;
+    renderProvider: string;
+    autoApproveEnabled: boolean;
+    modelPolicyVersion: number | null;
+    renderSpecVersion: number | null;
+    providerCapabilityVersion: number | null;
+    awaitingReviewJobs: number;
+    awaitingReviewAssets: number;
+    quarantinedAssets: number;
+  };
   logging: {
     subsystemState: "ready" | "degraded" | "unavailable";
     lastSuccessfulLogEmission: string | null;

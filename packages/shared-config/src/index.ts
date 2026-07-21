@@ -80,6 +80,24 @@ export const AI_PERMISSIONS = {
   TRANSLATION_GLOSSARIES_READ: "ai.translationGlossaries.read",
   TRANSLATION_GLOSSARIES_MANAGE: "ai.translationGlossaries.manage",
   TRANSLATION_GLOSSARIES_PUBLISH: "ai.translationGlossaries.publish",
+  CREATIVE_JOBS_CREATE: "ai.creativeJobs.create",
+  CREATIVE_JOBS_READ: "ai.creativeJobs.read",
+  CREATIVE_JOBS_RETRY: "ai.creativeJobs.retry",
+  CREATIVE_JOBS_CANCEL: "ai.creativeJobs.cancel",
+  CREATIVE_ASSETS_READ: "ai.creativeAssets.read",
+  CREATIVE_ASSETS_REGENERATE: "ai.creativeAssets.regenerate",
+  CREATIVE_ASSETS_REVIEW: "ai.creativeAssets.review",
+  CREATIVE_ASSETS_APPROVE: "ai.creativeAssets.approve",
+  CREATIVE_ASSETS_REJECT: "ai.creativeAssets.reject",
+  CREATIVE_MANUAL_ASSETS_CREATE: "ai.creativeManualAssets.create",
+  CREATIVE_MANUAL_ASSETS_COMPLETE: "ai.creativeManualAssets.complete",
+  CREATIVE_RIGHTS_READ: "ai.creativeRights.read",
+  CREATIVE_RIGHTS_REVIEW: "ai.creativeRights.review",
+  CREATIVE_PROVIDERS_READ: "ai.creativeProviders.read",
+  CREATIVE_PROVIDERS_MANAGE: "ai.creativeProviders.manage",
+  RENDER_SPECIFICATIONS_READ: "ai.renderSpecifications.read",
+  RENDER_SPECIFICATIONS_MANAGE: "ai.renderSpecifications.manage",
+  RENDER_SPECIFICATIONS_PUBLISH: "ai.renderSpecifications.publish",
   AUDIT_LOGS_READ: "ai.auditLogs.read",
 } as const;
 
@@ -246,6 +264,53 @@ export const apiEnvironmentSchema = serverEnvironmentSchema
       .default(0.9),
     CAMPAIGN_AUDIENCE_FIT_MIN: z.coerce.number().min(0).max(1).default(0.75),
     CAMPAIGN_AUTO_APPROVE_ENABLED: environmentBoolean.default(false),
+    AI_CREATIVE_QUEUE_NAME: z
+      .string()
+      .min(1)
+      .default("miraaj.ai.creative-generation"),
+    AI_CREATIVE_DLQ_NAME: z
+      .string()
+      .min(1)
+      .default("miraaj.ai.creative-generation.dead-letter"),
+    AI_CREATIVE_WORKER_CONCURRENCY: positiveInt(1, 16).default(2),
+    AI_CREATIVE_IMAGE_CONCURRENCY: positiveInt(1, 16).default(2),
+    AI_CREATIVE_VIDEO_CONCURRENCY: positiveInt(1, 8).default(1),
+    AI_CREATIVE_MAX_RETRIES: positiveInt(0, 10).default(3),
+    AI_CREATIVE_JOB_TIMEOUT_SECONDS: positiveInt(30, 3_600).default(900),
+    AI_CREATIVE_STALE_SECONDS: positiveInt(60, 7_200).default(1_200),
+    AI_CREATIVE_RECONCILE_INTERVAL_SECONDS: positiveInt(15, 3_600).default(60),
+    AI_IMAGE_PROVIDER: z.enum(["disabled", "mock"]).default("disabled"),
+    AI_IMAGE_MODEL: z.string().default(""),
+    AI_IMAGE_PROVIDER_TIMEOUT_SECONDS: positiveInt(5, 1_800).default(300),
+    AI_IMAGE_PROVIDER_MAX_RETRIES: positiveInt(0, 5).default(2),
+    AI_VIDEO_PROVIDER: z.enum(["disabled", "mock"]).default("disabled"),
+    AI_VIDEO_MODEL: z.string().default(""),
+    AI_VIDEO_PROVIDER_TIMEOUT_SECONDS: positiveInt(5, 3_600).default(900),
+    AI_VIDEO_PROVIDER_MAX_RETRIES: positiveInt(0, 5).default(2),
+    AI_RENDER_PROVIDER: z.enum(["local", "disabled"]).default("local"),
+    AI_RENDER_TIMEOUT_SECONDS: positiveInt(5, 3_600).default(600),
+    CREATIVE_MAX_BRIEFS_PER_JOB: positiveInt(1, 50).default(20),
+    CREATIVE_MAX_VARIANTS_PER_BRIEF: positiveInt(1, 10).default(4),
+    CREATIVE_MAX_TOTAL_ASSETS_PER_JOB: positiveInt(1, 100).default(40),
+    CREATIVE_MAX_IMAGE_BYTES: positiveInt(1_024, 104_857_600).default(52_428_800),
+    CREATIVE_MAX_VIDEO_BYTES: positiveInt(1_024, 2_147_483_647).default(
+      1_073_741_824,
+    ),
+    CREATIVE_MAX_VIDEO_DURATION_SECONDS: positiveInt(1, 3_600).default(600),
+    CREATIVE_MAX_PROVIDER_DOWNLOAD_BYTES: positiveInt(
+      1_024,
+      2_147_483_647,
+    ).default(1_073_741_824),
+    CREATIVE_PROVIDER_DOWNLOAD_TIMEOUT_SECONDS: positiveInt(5, 1_800).default(
+      300,
+    ),
+    CREATIVE_QUALITY_HIGH_MIN: z.coerce.number().min(0).max(1).default(0.88),
+    CREATIVE_QUALITY_REVIEW_MIN: z.coerce.number().min(0).max(1).default(0.65),
+    CREATIVE_BRAND_SCORE_MIN: z.coerce.number().min(0).max(1).default(0.85),
+    CREATIVE_COMPLIANCE_SCORE_MIN: z.coerce.number().min(0).max(1).default(0.95),
+    CREATIVE_TEXT_ACCURACY_MIN: z.coerce.number().min(0).max(1).default(0.92),
+    CREATIVE_RIGHTS_CONFIDENCE_MIN: z.coerce.number().min(0).max(1).default(0.9),
+    CREATIVE_AUTO_APPROVE_ENABLED: environmentBoolean.default(false),
   })
   .superRefine((environment, context) => {
     if (
@@ -285,6 +350,24 @@ export const apiEnvironmentSchema = serverEnvironmentSchema
         path: ["CAMPAIGN_QUALITY_REVIEW_MIN"],
         message:
           "CAMPAIGN_QUALITY_REVIEW_MIN must be <= CAMPAIGN_QUALITY_HIGH_MIN",
+      });
+    }
+    if (
+      environment.CREATIVE_QUALITY_REVIEW_MIN > environment.CREATIVE_QUALITY_HIGH_MIN
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["CREATIVE_QUALITY_REVIEW_MIN"],
+        message:
+          "CREATIVE_QUALITY_REVIEW_MIN must be <= CREATIVE_QUALITY_HIGH_MIN",
+      });
+    }
+    if (environment.CREATIVE_AUTO_APPROVE_ENABLED) {
+      context.addIssue({
+        code: "custom",
+        path: ["CREATIVE_AUTO_APPROVE_ENABLED"],
+        message:
+          "CREATIVE_AUTO_APPROVE_ENABLED must remain false in Prompt 5",
       });
     }
   });
