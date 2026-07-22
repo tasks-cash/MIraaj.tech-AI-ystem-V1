@@ -127,6 +127,25 @@ def _ratio(expected: str, actual: str) -> float:
     )
 
 
+def _result_checksum(decision: str, scores: dict[str, float], reasons: list[str]) -> str:
+    def canonical(value: object) -> object:
+        if isinstance(value, dict):
+            return {key: canonical(value[key]) for key in sorted(value)}
+        if isinstance(value, list):
+            return [canonical(item) for item in value]
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return value
+
+    checksum_payload = json.dumps(
+        canonical({"decision": decision, "scores": scores, "reasons": sorted(set(reasons))}),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(checksum_payload.encode()).hexdigest()
+
+
 def verify_proof(payload: ProofVerifyInput, settings: Settings) -> ProofVerifyResponse:
     started = perf_counter()
     ocr = TesseractOCRProvider(settings)
@@ -263,11 +282,6 @@ def verify_proof(payload: ProofVerifyInput, settings: Settings) -> ProofVerifyRe
             else "unsupported_platform"
         ),
     }
-    checksum_payload = json.dumps(
-        {"decision": decision, "scores": scores, "reasons": reasons},
-        sort_keys=True,
-        separators=(",", ":"),
-    )
     return ProofVerifyResponse(
         decision=decision,
         scores=scores,
@@ -278,6 +292,6 @@ def verify_proof(payload: ProofVerifyInput, settings: Settings) -> ProofVerifyRe
         if exact_duplicate or perceptual_duplicate
         else [],
         manipulationIndicators=indicators,
-        resultChecksum=hashlib.sha256(checksum_payload.encode()).hexdigest(),
+        resultChecksum=_result_checksum(decision, scores, reasons),
         durationMs=max(0, round((perf_counter() - started) * 1000)),
     )

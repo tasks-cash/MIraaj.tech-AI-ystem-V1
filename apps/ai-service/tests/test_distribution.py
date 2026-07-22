@@ -11,7 +11,7 @@ from app.models.distribution_schemas import (
     ProofEvidenceInput,
     ProofVerifyInput,
 )
-from app.services.distribution import generate_distribution_assets, verify_proof
+from app.services.distribution import _result_checksum, generate_distribution_assets, verify_proof
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +26,12 @@ def deterministic_screenshot_ocr(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         "app.services.distribution.TesseractOCRProvider.is_available", lambda _self: True
+    )
+
+
+def test_result_checksum_matches_cross_repository_unicode_vector() -> None:
+    assert _result_checksum("needs_review", {"z": 0.5, "a": 1.0}, ["B", "A", "A"]) == (
+        "f4f7c955e18eabcc88b09b8cd4f6432bbc1a5fc68106b352d515f9334933b3f8"
     )
 
 

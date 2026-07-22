@@ -223,6 +223,16 @@ const outboxEventSchema = new Schema(
 );
 outboxEventSchema.index({ status: 1, nextAttemptAt: 1 });
 
+const tasksCashReplayNonceSchema = new Schema(
+  {
+    nonceHash: { type: String, required: true, unique: true },
+    requestTimestamp: { type: Number, required: true },
+    expiresAt: { type: Date, required: true },
+  },
+  { timestamps: true, collection: "ai_tasks_cash_replay_nonces" },
+);
+tasksCashReplayNonceSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
 function model(name: string, schema: Schema): Model<any> {
   return mongoose.models[name] ?? mongoose.model(name, schema);
 }
@@ -237,3 +247,4 @@ export const ProofSubmissionModel = model("AiProofSubmission", proofSubmissionSc
 export const ProofVerificationAttemptModel = model("AiProofVerificationAttempt", verificationAttemptSchema);
 export const ProofReviewModel = model("AiProofReview", proofReviewSchema);
 export const IntegrationOutboxEventModel = model("AiIntegrationOutboxEvent", outboxEventSchema);
+export const TasksCashReplayNonceModel = model("AiTasksCashReplayNonce", tasksCashReplayNonceSchema);

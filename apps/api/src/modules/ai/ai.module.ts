@@ -66,6 +66,7 @@ import { TasksCashDistributionController } from "./distribution/tasks-cash.contr
 import { DistributionService } from "./distribution/distribution.service.js";
 import { DistributionWorkerService } from "./distribution/distribution-worker.service.js";
 import { TasksCashHmacGuard } from "./distribution/tasks-cash-hmac.guard.js";
+import { TasksCashReplayService } from "./distribution/tasks-cash-replay.service.js";
 
 @Module({
   imports: [
@@ -140,6 +141,7 @@ import { TasksCashHmacGuard } from "./distribution/tasks-cash-hmac.guard.js";
     DistributionService,
     DistributionWorkerService,
     TasksCashHmacGuard,
+    TasksCashReplayService,
   ],
   exports: [
     AiService,

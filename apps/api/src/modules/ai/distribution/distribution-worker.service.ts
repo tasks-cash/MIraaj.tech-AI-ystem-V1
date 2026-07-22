@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { Worker, type Job } from "bullmq";
 import { loadEnvironment } from "../../../environment.js";
 import { AiInternalClientService } from "../ai-internal-client.service.js";
@@ -16,6 +16,7 @@ import {
 import { MediaStorageService } from "../media/media-storage.service.js";
 import { DistributionQueueService } from "../queue/distribution-queue.service.js";
 import { DistributionService } from "./distribution.service.js";
+import { signProofCallback } from "./distribution.contracts.js";
 
 @Injectable()
 export class DistributionWorkerService implements OnModuleInit, OnModuleDestroy {
@@ -128,7 +129,7 @@ export class DistributionWorkerService implements OnModuleInit, OnModuleDestroy 
     if (!event) return;
     const body = JSON.stringify(event.payload);
     const timestamp = Date.now().toString();
-    const signature = createHmac("sha256", this.environment.TASKS_CASH_HMAC_SECRET).update(`${timestamp}.${body}`).digest("hex");
+    const signature = signProofCallback(this.environment.TASKS_CASH_HMAC_SECRET, Number(timestamp), body);
     try {
       const response = await fetch(this.environment.TASKS_CASH_CALLBACK_URL, { method: "POST", headers: { "content-type": "application/json", "x-miraaj-event-id": event.eventId, "x-miraaj-timestamp": timestamp, "x-miraaj-signature": signature }, body, signal: AbortSignal.timeout(10_000) });
       if (!response.ok) throw new Error(`CALLBACK_HTTP_${response.status}`);

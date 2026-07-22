@@ -24,6 +24,12 @@ import {
 } from "../models/distribution.schema.js";
 import { MediaStorageService } from "../media/media-storage.service.js";
 import { DistributionQueueService } from "../queue/distribution-queue.service.js";
+import {
+  PROOF_VERIFICATION_EVENT_TYPE,
+  PROOF_VERIFICATION_EVENT_VERSION,
+  TASKS_CASH_DISTRIBUTION_API_VERSION,
+  proofVerificationCompletedEventSchema,
+} from "./distribution.contracts.js";
 
 const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 const redirectWindows = new Map<string, { startedAt: number; count: number }>();
@@ -182,8 +188,11 @@ export class DistributionService {
     return this.assignmentPackage(assignmentId);
   }
 
-  async assignmentPackage(id: string) {
-    const assignment = await DistributionAssignmentModel.findOne({ $or: [{ assignmentId: id }, { externalAssignmentId: id }] });
+  async assignmentPackage(id: string, externalUserId?: string) {
+    const assignment = await DistributionAssignmentModel.findOne({
+      $or: [{ assignmentId: id }, { externalAssignmentId: id }],
+      ...(externalUserId ? { externalUserId } : {}),
+    });
     if (!assignment) throw new NotFoundException("DISTRIBUTION_ASSIGNMENT_NOT_FOUND");
     const [template, copy, link, qr, header] = await Promise.all([
       DistributionTaskTemplateModel.findOne({ templateId: assignment.templateId }).lean(),
@@ -194,6 +203,7 @@ export class DistributionService {
     ]);
     if (!template || !copy || !link || !qr || !header) throw new NotFoundException("DISTRIBUTION_PACKAGE_INCOMPLETE");
     return {
+      apiVersion: TASKS_CASH_DISTRIBUTION_API_VERSION,
       externalAssignmentId: assignment.externalAssignmentId, status: assignment.status, platform: assignment.platform,
       targetAudience: assignment.audienceType, communityRules: template.groupMatchingRules, approvedPostText: copy.postText,
       headline: copy.headline, cta: copy.cta, hashtags: copy.hashtags, requiredDisclosure: copy.disclosure,
@@ -209,9 +219,15 @@ export class DistributionService {
   }
 
   listAssignments() { return DistributionAssignmentModel.find({}).select("-assignmentTokenHash").sort({ createdAt: -1 }).lean(); }
-  async cancelAssignment(id: string) {
-    const assignment = await DistributionAssignmentModel.findOneAndUpdate({ $or: [{ assignmentId: id }, { externalAssignmentId: id }], status: { $nin: ["verified", "rejected", "cancelled", "expired"] } }, { $set: { status: "cancelled", cancelledAt: new Date(), rewardEligibilityRecommendation: "not_eligible" } }, { new: true }).orFail(() => new ConflictException("DISTRIBUTION_ASSIGNMENT_CANCEL_INVALID"));
+  async cancelAssignment(id: string, externalUserId?: string) {
+    const assignment = await DistributionAssignmentModel.findOneAndUpdate({ $or: [{ assignmentId: id }, { externalAssignmentId: id }], ...(externalUserId ? { externalUserId } : {}), status: { $nin: ["verified", "rejected", "cancelled", "expired"] } }, { $set: { status: "cancelled", cancelledAt: new Date(), rewardEligibilityRecommendation: "not_eligible" } }, { new: true }).orFail(() => new ConflictException("DISTRIBUTION_ASSIGNMENT_CANCEL_INVALID"));
     await TrackedLinkModel.updateOne({ trackedLinkId: assignment.trackedLinkId }, { $set: { status: "revoked", revokedAt: new Date() } });
+    if (externalUserId) return {
+      apiVersion: TASKS_CASH_DISTRIBUTION_API_VERSION,
+      externalAssignmentId: assignment.externalAssignmentId,
+      status: "cancelled",
+      rewardEligibilityRecommendation: assignment.rewardEligibilityRecommendation,
+    };
     return publicDocument(assignment);
   }
 
@@ -249,6 +265,7 @@ export class DistributionService {
     const retentionExpiresAt = new Date(Date.now() + this.environment.DISTRIBUTION_PROOF_RETENTION_DAYS * 86_400_000);
     await ProofSubmissionModel.create({ proofSubmissionId, assignmentId: assignment.assignmentId, externalAssignmentId: assignment.externalAssignmentId, externalUserId: assignment.externalUserId, evidence, postUrl: input.postUrl, claimedPublicationAt: input.claimedPublicationAt, claimedGroupName: input.claimedGroupName, userNote: input.userNote, idempotencyKeyHash: hash, retentionExpiresAt, createdBy: actor, correlationId: String(input.correlationId ?? randomUUID()) });
     return {
+      apiVersion: TASKS_CASH_DISTRIBUTION_API_VERSION,
       proofSubmissionId,
       evidence: evidence.map((item) => ({
         evidenceId: item.evidenceId,
@@ -273,10 +290,31 @@ export class DistributionService {
     await proof.save();
     await DistributionAssignmentModel.updateOne({ assignmentId: proof.assignmentId }, { $set: { status: "verification_pending", latestProofSubmissionId: proof.proofSubmissionId } });
     await this.queues.enqueueProof(proof.proofSubmissionId);
-    return publicDocument(proof);
+    return {
+      apiVersion: TASKS_CASH_DISTRIBUTION_API_VERSION,
+      proofSubmissionId: proof.proofSubmissionId,
+      externalAssignmentId: proof.externalAssignmentId,
+      status: proof.status,
+      submittedAt: proof.submittedAt,
+    };
   }
 
   getProof(id: string) { return ProofSubmissionModel.findOne({ proofSubmissionId: id }).lean().orFail(() => new NotFoundException("PROOF_SUBMISSION_NOT_FOUND")); }
+  async getProofForExternalUser(id: string, externalUserId: string) {
+    const proof = await ProofSubmissionModel.findOne({ proofSubmissionId: id, externalUserId })
+      .select("proofSubmissionId externalAssignmentId status submittedAt createdAt updatedAt")
+      .lean();
+    if (!proof) throw new NotFoundException("PROOF_SUBMISSION_NOT_FOUND");
+    return {
+      apiVersion: TASKS_CASH_DISTRIBUTION_API_VERSION,
+      proofSubmissionId: proof.proofSubmissionId,
+      externalAssignmentId: proof.externalAssignmentId,
+      status: proof.status,
+      submittedAt: proof.submittedAt,
+      createdAt: proof.createdAt,
+      updatedAt: proof.updatedAt,
+    };
+  }
   listProofs() { return ProofSubmissionModel.find({}).sort({ createdAt: -1 }).lean(); }
   async retryProof(proofSubmissionId: string) {
     const proof = await ProofSubmissionModel.findOne({ proofSubmissionId });
@@ -300,7 +338,8 @@ export class DistributionService {
       ProofSubmissionModel.updateOne({ proofSubmissionId }, { $set: { status: finalStatus === "awaiting_proof" ? "submitted" : finalStatus } }),
       DistributionAssignmentModel.updateOne({ assignmentId: proof.assignmentId }, { $set: { status: finalStatus, latestVerificationDecision: decision, rewardEligibilityRecommendation: reward } }),
     ]);
-    await this.createOutboxEvent(proof, decision, reward, attempt);
+    const eventDecision = decision === "verified" ? "verified" : decision === "request_more_evidence" ? "needs_review" : "rejected";
+    await this.createOutboxEvent(proof, eventDecision, reward, attempt);
     return review;
   }
 
@@ -308,7 +347,7 @@ export class DistributionService {
     const assignment = await DistributionAssignmentModel.findOne({ assignmentId: proof.assignmentId }).lean();
     if (!assignment) return;
     const eventId = `evt_${randomUUID()}`;
-    const payload = { eventId, eventVersion: 1, occurredAt: new Date().toISOString(), externalTaskId: assignment.externalTaskId, externalUserId: assignment.externalUserId, externalAssignmentId: assignment.externalAssignmentId, proofSubmissionId: proof.proofSubmissionId, verificationDecision: decision, verificationConfidence: attempt.scores?.overallVerificationScore ?? 0, rewardEligibilityRecommendation: reward, reasonCodes: attempt.reasonCodes ?? [], resultChecksum: attempt.resultChecksum, correlationId: proof.correlationId };
+    const payload = proofVerificationCompletedEventSchema.parse({ eventId, eventVersion: PROOF_VERIFICATION_EVENT_VERSION, eventType: PROOF_VERIFICATION_EVENT_TYPE, occurredAt: new Date().toISOString(), externalTaskId: assignment.externalTaskId, externalUserId: assignment.externalUserId, externalAssignmentId: assignment.externalAssignmentId, proofSubmissionId: proof.proofSubmissionId, verificationDecision: decision, verificationConfidence: attempt.scores?.overallVerificationScore ?? 0, rewardEligibilityRecommendation: reward, reasonCodes: attempt.reasonCodes ?? [], resultChecksum: attempt.resultChecksum, correlationId: proof.correlationId });
     await IntegrationOutboxEventModel.create({ eventId, eventType: "proof.verification.completed", payload, payloadChecksum: digest(JSON.stringify(payload)), nextAttemptAt: new Date(), createdBy: "proof-verification", correlationId: proof.correlationId });
     if (this.environment.TASKS_CASH_INTEGRATION_ENABLED) await this.queues.enqueueOutbox(eventId);
   }

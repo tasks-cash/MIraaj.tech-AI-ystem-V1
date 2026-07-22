@@ -28,7 +28,8 @@
     "ioredis": "^5.8.2",
     "mongoose": "^9.1.5",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@miraaj/eslint-config": "workspace:*",
