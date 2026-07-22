@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { HeadBucketCommand } from "@aws-sdk/client-s3";
 import { loadEnvironment } from "../../environment.js";
@@ -19,6 +19,7 @@ import { StaleJobService } from "./queue/stale-job.service.js";
 import { CampaignQueueService } from "./queue/campaign-queue.service.js";
 import { CampaignSeedService } from "./campaigns/campaign-seed.service.js";
 import { CreativeQueueService } from "./queue/creative-queue.service.js";
+import { DistributionQueueService } from "./queue/distribution-queue.service.js";
 import { CreativeSeedService } from "./creative/creative-seed.service.js";
 import { AuditEventService } from "./audit/audit-event.service.js";
 import { CampaignJobModel, CampaignPackageModel } from "./models/campaign.schema.js";
@@ -28,6 +29,11 @@ import {
   CreativeProviderCapabilityModel,
   CreativeRenderSpecificationModel,
 } from "./models/creative.schema.js";
+import {
+  DistributionAssignmentModel,
+  IntegrationOutboxEventModel,
+  ProofSubmissionModel,
+} from "./models/distribution.schema.js";
 import {
   AiServiceTimeoutError,
   AiServiceUnavailableError,
@@ -66,6 +72,9 @@ export class AiHealthService {
     private readonly creativeSeed: CreativeSeedService,
     @Inject(AuditEventService)
     private readonly auditEvents: AuditEventService,
+    @Optional()
+    @Inject(DistributionQueueService)
+    private readonly distributionQueue?: DistributionQueueService,
   ) {}
 
   async getSystemStatus(input?: {
@@ -286,6 +295,27 @@ export class AiHealthService {
       awaitingReviewAssets: awaitingReviewCreativeAssets,
       quarantinedAssets: quarantinedCreativeAssets,
     };
+    const [distributionQueues, awaitingProofAssignments, pendingReviews, outboxPending, outboxFailed, distributionStatus] = await Promise.all([
+      this.distributionQueue?.getQueueStats() ?? Promise.resolve({}),
+      withTimeout(DistributionAssignmentModel.countDocuments({ status: { $in: ["active", "awaiting_proof"] } }).catch(() => 0), 1_000, 0),
+      withTimeout(ProofSubmissionModel.countDocuments({ status: "needs_review" }).catch(() => 0), 1_000, 0),
+      withTimeout(IntegrationOutboxEventModel.countDocuments({ status: { $in: ["pending", "retry_scheduled"] } }).catch(() => 0), 1_000, 0),
+      withTimeout(IntegrationOutboxEventModel.countDocuments({ status: "dead_letter" }).catch(() => 0), 1_000, 0),
+      this.client.getDistributionStatus?.({ requestId, correlationId }).catch(() => ({})) ?? Promise.resolve({}),
+    ]);
+    const distributionBlock: AiSystemStatus["distribution"] = {
+      queues: distributionQueues,
+      workerConcurrency: environment.AI_PROOF_WORKER_CONCURRENCY,
+      awaitingProofAssignments,
+      pendingReviews,
+      autoVerificationEnabled: environment.DISTRIBUTION_AUTO_VERIFY_ENABLED,
+      publicPostInspectionEnabled: environment.DISTRIBUTION_PUBLIC_POST_INSPECTION_ENABLED,
+      tasksCashIntegrationEnabled: environment.TASKS_CASH_INTEGRATION_ENABLED,
+      qrRenderer: typeof Object.entries(distributionStatus).find(([key]) => key === "qrRenderer")?.[1] === "string" ? Object.entries(distributionStatus).find(([key]) => key === "qrRenderer")?.[1] as string : "unavailable",
+      qrDecoder: typeof Object.entries(distributionStatus).find(([key]) => key === "qrDecoder")?.[1] === "string" ? Object.entries(distributionStatus).find(([key]) => key === "qrDecoder")?.[1] as string : "unavailable",
+      outboxPending,
+      outboxFailed,
+    };
     const loggingBlock: AiSystemStatus["logging"] = {
       subsystemState: "ready",
       lastSuccessfulLogEmission: new Date().toISOString(),
@@ -335,6 +365,7 @@ export class AiHealthService {
         },
         campaigns: campaignsBlock,
         creative: creativeBlock,
+        distribution: distributionBlock,
         logging: loggingBlock,
         error: null,
       };
@@ -375,6 +406,7 @@ export class AiHealthService {
         },
         campaigns: campaignsBlock,
         creative: creativeBlock,
+        distribution: distributionBlock,
         logging: loggingBlock,
         error: safe,
       };

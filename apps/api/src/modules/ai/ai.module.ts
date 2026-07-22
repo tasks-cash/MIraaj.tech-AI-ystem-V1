@@ -46,6 +46,7 @@ import { BrandProfileService } from "./campaigns/brand-profile.service.js";
 import { CampaignPolicyService } from "./campaigns/campaign-policy.service.js";
 import { CampaignController } from "./campaigns/campaign.controller.js";
 import { CreativeQueueModule } from "./queue/creative-queue.module.js";
+import { DistributionQueueModule } from "./queue/distribution-queue.module.js";
 import { CreativeWorkerService } from "./creative/creative-worker.service.js";
 import { CreativeSeedService } from "./creative/creative-seed.service.js";
 import { CreativeSourceEligibilityService } from "./creative/creative-source-eligibility.service.js";
@@ -59,6 +60,12 @@ import { CreativeUsageService } from "./creative/creative-usage.service.js";
 import { CreativeController } from "./creative/creative.controller.js";
 import { AuditEventService } from "./audit/audit-event.service.js";
 import { AuditEventsController } from "./audit/audit-events.controller.js";
+import { DistributionController } from "./distribution/distribution.controller.js";
+import { TrackedLinkController } from "./distribution/tracked-link.controller.js";
+import { TasksCashDistributionController } from "./distribution/tasks-cash.controller.js";
+import { DistributionService } from "./distribution/distribution.service.js";
+import { DistributionWorkerService } from "./distribution/distribution-worker.service.js";
+import { TasksCashHmacGuard } from "./distribution/tasks-cash-hmac.guard.js";
 
 @Module({
   imports: [
@@ -66,6 +73,7 @@ import { AuditEventsController } from "./audit/audit-events.controller.js";
     IntelligenceQueueModule,
     CampaignQueueModule,
     CreativeQueueModule,
+    DistributionQueueModule,
   ],
   controllers: [
     AiController,
@@ -79,6 +87,9 @@ import { AuditEventsController } from "./audit/audit-events.controller.js";
     CampaignController,
     CreativeController,
     AuditEventsController,
+    DistributionController,
+    TrackedLinkController,
+    TasksCashDistributionController,
   ],
   providers: [
     AiService,
@@ -126,6 +137,9 @@ import { AuditEventsController } from "./audit/audit-events.controller.js";
     CreativeUsageService,
     CreativeWorkerService,
     AuditEventService,
+    DistributionService,
+    DistributionWorkerService,
+    TasksCashHmacGuard,
   ],
   exports: [
     AiService,
@@ -135,6 +149,7 @@ import { AuditEventsController } from "./audit/audit-events.controller.js";
     IntelligenceQueueModule,
     CampaignQueueModule,
     CreativeQueueModule,
+    DistributionQueueModule,
     CatalogService,
   ],
 })

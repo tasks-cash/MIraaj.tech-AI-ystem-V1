@@ -99,6 +99,30 @@ export const AI_PERMISSIONS = {
   RENDER_SPECIFICATIONS_MANAGE: "ai.renderSpecifications.manage",
   RENDER_SPECIFICATIONS_PUBLISH: "ai.renderSpecifications.publish",
   AUDIT_LOGS_READ: "ai.auditLogs.read",
+  DISTRIBUTION_TEMPLATES_CREATE: "ai.distributionTemplates.create",
+  DISTRIBUTION_TEMPLATES_READ: "ai.distributionTemplates.read",
+  DISTRIBUTION_TEMPLATES_UPDATE: "ai.distributionTemplates.update",
+  DISTRIBUTION_TEMPLATES_APPROVE: "ai.distributionTemplates.approve",
+  DISTRIBUTION_TEMPLATES_PAUSE: "ai.distributionTemplates.pause",
+  DISTRIBUTION_TEMPLATES_ARCHIVE: "ai.distributionTemplates.archive",
+  DISTRIBUTION_COPY_GENERATE: "ai.distributionCopy.generate",
+  DISTRIBUTION_COPY_CREATE: "ai.distributionCopy.create",
+  DISTRIBUTION_COPY_READ: "ai.distributionCopy.read",
+  DISTRIBUTION_COPY_APPROVE: "ai.distributionCopy.approve",
+  DISTRIBUTION_COPY_REJECT: "ai.distributionCopy.reject",
+  DISTRIBUTION_ASSIGNMENTS_CREATE: "ai.distributionAssignments.create",
+  DISTRIBUTION_ASSIGNMENTS_READ: "ai.distributionAssignments.read",
+  DISTRIBUTION_ASSIGNMENTS_CANCEL: "ai.distributionAssignments.cancel",
+  DISTRIBUTION_ASSIGNMENTS_REGENERATE_PACKAGE:
+    "ai.distributionAssignments.regeneratePackage",
+  DISTRIBUTION_PROOFS_READ: "ai.distributionProofs.read",
+  DISTRIBUTION_PROOFS_VERIFY: "ai.distributionProofs.verify",
+  DISTRIBUTION_PROOFS_RETRY: "ai.distributionProofs.retry",
+  DISTRIBUTION_PROOFS_REVIEW: "ai.distributionProofs.review",
+  DISTRIBUTION_PROOFS_REQUEST_EVIDENCE:
+    "ai.distributionProofs.requestEvidence",
+  DISTRIBUTION_TRACKING_READ: "ai.distributionTracking.read",
+  DISTRIBUTION_TRACKING_REVOKE: "ai.distributionTracking.revoke",
 } as const;
 
 export const ALL_TEMPORARY_ADMIN_PERMISSIONS = Object.values(AI_PERMISSIONS);
@@ -321,6 +345,35 @@ export const apiEnvironmentSchema = serverEnvironmentSchema
     CREATIVE_TEXT_ACCURACY_MIN: z.coerce.number().min(0).max(1).default(0.92),
     CREATIVE_RIGHTS_CONFIDENCE_MIN: z.coerce.number().min(0).max(1).default(0.9),
     CREATIVE_AUTO_APPROVE_ENABLED: environmentBoolean.default(false),
+    AI_DISTRIBUTION_CONTENT_QUEUE_NAME: z.string().min(1).default("miraaj.ai.distribution-content"),
+    AI_PROOF_VERIFICATION_QUEUE_NAME: z.string().min(1).default("miraaj.ai.proof-verification"),
+    AI_PROOF_VERIFICATION_DLQ_NAME: z.string().min(1).default("miraaj.ai.proof-verification.dead-letter"),
+    AI_PROOF_WORKER_CONCURRENCY: positiveInt(1, 16).default(2),
+    AI_PROOF_MAX_RETRIES: positiveInt(0, 10).default(3),
+    AI_PROOF_JOB_TIMEOUT_SECONDS: positiveInt(10, 1_800).default(300),
+    AI_PROOF_STALE_SECONDS: positiveInt(30, 7_200).default(600),
+    DISTRIBUTION_ASSIGNMENT_TOKEN_BYTES: positiveInt(16, 64).default(32),
+    DISTRIBUTION_ASSIGNMENT_DEFAULT_TTL_MINUTES: positiveInt(5, 43_200).default(1_440),
+    DISTRIBUTION_PROOF_DEADLINE_MINUTES: positiveInt(5, 43_200).default(1_440),
+    DISTRIBUTION_TRACKED_LINK_DOMAIN: optionalHttpUrl.default(""),
+    DISTRIBUTION_TARGET_DOMAIN_ALLOWLIST: z.string().default(""),
+    DISTRIBUTION_PUBLIC_POST_INSPECTION_ENABLED: environmentBoolean.default(false),
+    DISTRIBUTION_QR_WIDTH: positiveInt(128, 2_048).default(768),
+    DISTRIBUTION_QR_ERROR_CORRECTION_LEVEL: z.enum(["L", "M", "Q", "H"]).default("H"),
+    DISTRIBUTION_HEADER_ASSET_ENABLED: environmentBoolean.default(true),
+    DISTRIBUTION_AUTO_VERIFY_ENABLED: environmentBoolean.default(false),
+    DISTRIBUTION_AUTO_VERIFY_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.95),
+    DISTRIBUTION_HUMAN_REVIEW_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.6),
+    DISTRIBUTION_MAX_SCREENSHOTS: positiveInt(1, 20).default(5),
+    DISTRIBUTION_MAX_SCREENSHOT_BYTES: positiveInt(1_024, 104_857_600).default(20_971_520),
+    DISTRIBUTION_MAX_SCREEN_RECORDING_SECONDS: positiveInt(1, 600).default(60),
+    DISTRIBUTION_PROOF_RETENTION_DAYS: positiveInt(1, 365).default(90),
+    DISTRIBUTION_REJECTED_PROOF_RETENTION_DAYS: positiveInt(1, 365).default(30),
+    TASKS_CASH_INTEGRATION_ENABLED: environmentBoolean.default(false),
+    TASKS_CASH_OUTBOX_QUEUE_NAME: z.string().min(1).default("miraaj.integrations.tasks-cash.outbox"),
+    TASKS_CASH_CALLBACK_URL: optionalHttpUrl.default(""),
+    TASKS_CASH_HMAC_SECRET: z.string().default(""),
+    TASKS_CASH_CALLBACK_MAX_RETRIES: positiveInt(1, 25).default(10),
   })
   .superRefine((environment, context) => {
     if (
@@ -378,6 +431,23 @@ export const apiEnvironmentSchema = serverEnvironmentSchema
         path: ["CREATIVE_AUTO_APPROVE_ENABLED"],
         message:
           "CREATIVE_AUTO_APPROVE_ENABLED must remain false in Prompt 5",
+      });
+    }
+    if (environment.DISTRIBUTION_AUTO_VERIFY_ENABLED) {
+      context.addIssue({
+        code: "custom",
+        path: ["DISTRIBUTION_AUTO_VERIFY_ENABLED"],
+        message: "DISTRIBUTION_AUTO_VERIFY_ENABLED must remain false by default",
+      });
+    }
+    if (
+      environment.TASKS_CASH_INTEGRATION_ENABLED &&
+      (!environment.TASKS_CASH_CALLBACK_URL || environment.TASKS_CASH_HMAC_SECRET.length < 32)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["TASKS_CASH_INTEGRATION_ENABLED"],
+        message: "enabled Tasks.cash integration requires a callback URL and 32-character HMAC secret",
       });
     }
   });

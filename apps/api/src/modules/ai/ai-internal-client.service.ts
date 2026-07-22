@@ -418,6 +418,45 @@ export class AiInternalClientService {
     });
   }
 
+  async createDistributionAssets(
+    body: Record<string, unknown>,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/internal/v1/distribution/assets",
+      body,
+      timeoutMs: loadEnvironment().AI_RENDER_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `distribution-assets-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async verifyDistributionProof(
+    body: Record<string, unknown>,
+    input?: { requestId?: string; correlationId?: string; idempotencyKey?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/internal/v1/distribution/proofs/verify",
+      body,
+      timeoutMs: loadEnvironment().AI_PROOF_JOB_TIMEOUT_SECONDS * 1_000,
+      idempotencyKey: input?.idempotencyKey ?? `proof-verify-${randomUUID()}`,
+      ...input,
+    });
+  }
+
+  async getDistributionStatus(input?: {
+    requestId?: string;
+    correlationId?: string;
+  }): Promise<Record<string, unknown>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "GET",
+      path: "/internal/v1/distribution/status",
+      ...input,
+    });
+  }
+
   private async requestJson<T>(input: {
     method: "GET" | "POST";
     path: string;

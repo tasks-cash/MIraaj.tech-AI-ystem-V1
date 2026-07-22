@@ -47,6 +47,7 @@ class TesseractOCRProvider:
         image_bytes: bytes,
         language_packs: tuple[str, ...],
         timeout_seconds: int,
+        page_segmentation_mode: int = 3,
     ) -> OCRResultPayload:
         if not self._binary:
             raise RuntimeError("OCR engine unavailable.")
@@ -72,7 +73,7 @@ class TesseractOCRProvider:
                     "-l",
                     language_arg,
                     "--psm",
-                    "3",
+                    str(page_segmentation_mode),
                 ],
                 input=image_bytes,
                 check=True,

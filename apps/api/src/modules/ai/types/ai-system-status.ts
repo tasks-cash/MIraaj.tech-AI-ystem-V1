@@ -95,6 +95,19 @@ export interface AiSystemStatus {
     awaitingReviewAssets: number;
     quarantinedAssets: number;
   };
+  distribution: {
+    queues: Record<string, QueueCountSnapshot>;
+    workerConcurrency: number;
+    awaitingProofAssignments: number;
+    pendingReviews: number;
+    autoVerificationEnabled: boolean;
+    publicPostInspectionEnabled: boolean;
+    tasksCashIntegrationEnabled: boolean;
+    qrRenderer: string;
+    qrDecoder: string;
+    outboxPending: number;
+    outboxFailed: number;
+  };
   logging: {
     subsystemState: "ready" | "degraded" | "unavailable";
     lastSuccessfulLogEmission: string | null;

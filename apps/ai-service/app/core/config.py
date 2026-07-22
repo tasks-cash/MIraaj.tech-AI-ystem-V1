@@ -123,6 +123,16 @@ class Settings(BaseSettings):
     CREATIVE_MAX_PROVIDER_DOWNLOAD_BYTES: int = Field(default=1_073_741_824, ge=1_024)
     CREATIVE_PROVIDER_DOWNLOAD_TIMEOUT_SECONDS: int = Field(default=300, ge=5, le=1_800)
 
+    # Prompt 6 — local QR/header generation and deterministic proof verification.
+    DISTRIBUTION_QR_WIDTH: int = Field(default=768, ge=128, le=2_048)
+    DISTRIBUTION_QR_ERROR_CORRECTION_LEVEL: str = Field(default="H", pattern="^[LMQH]$")
+    DISTRIBUTION_AUTO_VERIFY_ENABLED: bool = False
+    DISTRIBUTION_AUTO_VERIFY_MIN_SCORE: float = Field(default=0.95, ge=0.0, le=1.0)
+    DISTRIBUTION_HUMAN_REVIEW_MIN_SCORE: float = Field(default=0.60, ge=0.0, le=1.0)
+    DISTRIBUTION_MAX_SCREENSHOTS: int = Field(default=5, ge=1, le=20)
+    DISTRIBUTION_MAX_SCREENSHOT_BYTES: int = Field(default=20_971_520, ge=1_024)
+    DISTRIBUTION_PUBLIC_POST_INSPECTION_ENABLED: bool = False
+
     @field_validator("LOG_LEVEL", mode="before")
     @classmethod
     def normalize_log_level(cls, value: object) -> str:
@@ -183,6 +193,8 @@ class Settings(BaseSettings):
             raise ValueError("AI_IMAGE_PROVIDER_API_KEY is required when AI_IMAGE_PROVIDER=openai")
         if self.AI_VIDEO_PROVIDER == "runway" and self.AI_VIDEO_PROVIDER_API_KEY is None:
             raise ValueError("AI_VIDEO_PROVIDER_API_KEY is required when AI_VIDEO_PROVIDER=runway")
+        if self.DISTRIBUTION_AUTO_VERIFY_ENABLED:
+            raise ValueError("DISTRIBUTION_AUTO_VERIFY_ENABLED must remain false by default")
         return self
 
     @property

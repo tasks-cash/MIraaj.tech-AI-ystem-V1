@@ -148,4 +148,15 @@ export class MediaStorageService {
       }),
     );
   }
+
+  async getBinaryObject(objectKey: string): Promise<Buffer> {
+    const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+    const response = await this.client.send(
+      new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }),
+    );
+    if (!response.Body) {
+      throw new Error("PRIVATE_OBJECT_BODY_MISSING");
+    }
+    return Buffer.from(await response.Body.transformToByteArray());
+  }
 }
