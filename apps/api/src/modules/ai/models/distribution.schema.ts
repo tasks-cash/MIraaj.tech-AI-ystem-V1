@@ -158,7 +158,7 @@ const proofSubmissionSchema = new Schema(
     userNote: { type: String },
     idempotencyKeyHash: { type: String, required: true, unique: true },
     submittedAt: { type: Date },
-    retentionExpiresAt: { type: Date, required: true, index: true },
+    retentionExpiresAt: { type: Date, required: true },
     ...auditFields,
   },
   { timestamps: true, collection: "ai_proof_submissions" },
