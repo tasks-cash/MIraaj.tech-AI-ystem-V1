@@ -21,6 +21,24 @@ describe("API environment policy", () => {
     expect(apiEnvironmentSchema.safeParse(baseEnvironment).success).toBe(true);
   });
 
+  it("keeps Prompt 6 automatic verification and Tasks.cash integration disabled", () => {
+    const parsed = apiEnvironmentSchema.parse(baseEnvironment);
+    expect(parsed.DISTRIBUTION_AUTO_VERIFY_ENABLED).toBe(false);
+    expect(parsed.TASKS_CASH_INTEGRATION_ENABLED).toBe(false);
+    expect(parsed.AI_PROOF_VERIFICATION_QUEUE_NAME).toBe(
+      "miraaj.ai.proof-verification",
+    );
+  });
+
+  it("fails closed when Tasks.cash is enabled without secure configuration", () => {
+    expect(
+      apiEnvironmentSchema.safeParse({
+        ...baseEnvironment,
+        TASKS_CASH_INTEGRATION_ENABLED: "true",
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects temporary admin authentication in production by default", () => {
     const result = apiEnvironmentSchema.safeParse({
       ...baseEnvironment,
