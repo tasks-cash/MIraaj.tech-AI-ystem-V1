@@ -1,5 +1,7 @@
 # Miraaj.tech API
 
+Prompt 6 admin routes live under `/api/admin/ai/distribution`; HMAC integration routes live under `/api/integrations/tasks-cash/distribution`; the intentionally public redirect is `GET /r/:opaqueToken`. Automatic verification and Tasks.cash delivery are disabled by default.
+
 NestJS orchestration API for the Miraaj.tech AI System.
 
 Owns authenticated admin media upload sessions, MongoDB persistence, MinIO

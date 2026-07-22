@@ -1,5 +1,7 @@
 # Miraaj.tech AI System architecture
 
+Prompt 6 extends the backend with approved distribution templates/copy, unique assignments and local assets, private proof intake, BullMQ verification, immutable review, and a signed persistent Tasks.cash outbox. Screenshot evidence is not absolute proof; private communities require review; Miraaj.tech never settles rewards.
+
 This document describes the repository as inspected and the Prompt 1 foundation
 that was implemented. It does not invent features that are not present.
 

@@ -1,5 +1,7 @@
 # Miraaj.tech AI System
 
+Prompt 6 adds backend-only campaign distribution assignments, opaque tracked links, local QR/header rendering, private proof verification, human review, and a disabled-by-default Tasks.cash outbox. See [distribution tasks](docs/distribution-task-guide.md), [proof verification](docs/proof-verification-guide.md), and [tracked-link security](docs/qr-tracked-link-security.md).
+
 API-only backend for the Miraaj.tech AI System: NestJS API, private FastAPI AI
 service, MongoDB, Redis, MinIO, and in-process BullMQ workers.
 

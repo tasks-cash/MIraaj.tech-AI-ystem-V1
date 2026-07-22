@@ -1,5 +1,7 @@
 # Miraaj.tech AI Service
 
+Prompt 6 provides HMAC-only `/internal/v1/distribution/assets`, `/proofs/verify`, and `/status`. QR generation/decoding, branded headers, OCR, duplicate checks and deterministic scoring run locally without OpenAI or Runway.
+
 Private FastAPI processing service for the Miraaj.tech AI System (Prompt 2).
 
 Owns media inspection, normalization support, OCR (Tesseract), script/language
