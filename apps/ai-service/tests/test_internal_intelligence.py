@@ -1,9 +1,9 @@
 import json
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app.main import app
+from tests.asgi_test_client import TestClient
 from tests.media_helpers import signed_headers
 
 

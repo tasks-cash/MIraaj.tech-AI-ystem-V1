@@ -28,23 +28,47 @@ class FetchedMedia:
     final_url: str
 
 
-def _host_entry_matches(parsed_host: str, port: int | None, allowlist_entry: str) -> bool:
+def _host_entry_matches(
+    parsed_host: str,
+    port: int,
+    standard_port: int,
+    allowlist_entry: str,
+) -> bool:
     entry = allowlist_entry.strip().lower()
     if not entry:
         return False
-    if ":" in entry:
-        host_part, _, port_part = entry.partition(":")
+
+    if entry.startswith("["):
+        closing = entry.find("]")
+        if closing < 0:
+            return False
+        host_part = entry[1:closing]
+        remainder = entry[closing + 1 :]
+        if not remainder:
+            return parsed_host == host_part and port == standard_port
+        if not remainder.startswith(":"):
+            return False
+        try:
+            entry_port = int(remainder[1:])
+        except ValueError:
+            return False
+        return parsed_host == host_part and port == entry_port
+
+    if entry.count(":") == 1:
+        host_part, port_part = entry.rsplit(":", 1)
         try:
             entry_port = int(port_part)
         except ValueError:
             return False
         return parsed_host == host_part and port == entry_port
-    return parsed_host == entry
+
+    return parsed_host == entry and port == standard_port
 
 
-def _host_allowed(hostname: str, port: int, settings: Settings) -> bool:
+def _host_allowed(hostname: str, port: int, standard_port: int, settings: Settings) -> bool:
     return any(
-        _host_entry_matches(hostname, port, entry) for entry in settings.media_fetch_allowed_hosts
+        _host_entry_matches(hostname, port, standard_port, entry)
+        for entry in settings.media_fetch_allowed_hosts
     )
 
 
@@ -63,8 +87,9 @@ def _validate_url(url: str, settings: Settings) -> tuple[str, int | None]:
 
     hostname = parsed.hostname.lower()
     port = parsed.port
+    standard_port = 443 if parsed.scheme == "https" else 80
     if port is None:
-        port = 443 if parsed.scheme == "https" else 80
+        port = standard_port
 
     if hostname in METADATA_HOSTS:
         raise _reject("Metadata endpoints are blocked.")
@@ -72,16 +97,17 @@ def _validate_url(url: str, settings: Settings) -> tuple[str, int | None]:
     if (
         settings.APP_ENV == "production"
         and hostname in LOCALHOST_NAMES
-        and not _host_allowed(hostname, port, settings)
+        and not _host_allowed(hostname, port, standard_port, settings)
     ):
         raise _reject("Localhost is blocked in production.")
 
-    if not _host_allowed(hostname, port, settings):
-        raise _reject("URL host is not allowlisted.")
-
-    standard_port = 443 if parsed.scheme == "https" else 80
-    if port != standard_port and not _host_allowed(hostname, port, settings):
-        raise _reject("Non-standard port is not allowlisted.")
+    if not _host_allowed(hostname, port, standard_port, settings):
+        message = (
+            "Non-standard port is not allowlisted."
+            if port != standard_port
+            else "URL host is not allowlisted."
+        )
+        raise _reject(message)
 
     try:
         resolved = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
@@ -97,12 +123,12 @@ def _validate_url(url: str, settings: Settings) -> tuple[str, int | None]:
         if (
             ip.is_loopback
             and settings.APP_ENV == "production"
-            and not _host_allowed(hostname, port, settings)
+            and not _host_allowed(hostname, port, standard_port, settings)
         ):
             raise _reject("Loopback address is blocked.")
         if ip.is_link_local or ip.is_multicast or ip.is_reserved:
             raise _reject("Private or reserved address is blocked.")
-        if ip.is_private and not _host_allowed(hostname, port, settings):
+        if ip.is_private and not _host_allowed(hostname, port, standard_port, settings):
             raise _reject("Private network address is blocked.")
 
     return hostname, port

@@ -1,8 +1,8 @@
 import pytest
-from fastapi.testclient import TestClient
 
 from app.core.config import reset_settings_cache
 from app.main import app
+from tests.asgi_test_client import TestClient
 
 
 def test_health() -> None:

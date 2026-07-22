@@ -3,7 +3,6 @@ import time
 from hashlib import sha256
 
 import pytest
-from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.core.config import Settings, get_settings, reset_settings_cache
@@ -16,6 +15,7 @@ from app.core.security import (
     verify_internal_request,
 )
 from app.main import app
+from tests.asgi_test_client import TestClient
 
 
 def signed_headers(

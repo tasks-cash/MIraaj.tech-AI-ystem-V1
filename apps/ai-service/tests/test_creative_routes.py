@@ -6,11 +6,11 @@ import base64
 import json
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app.core.config import reset_settings_cache
 from app.core.logging import redact_value
 from app.main import app
+from tests.asgi_test_client import TestClient
 from tests.media_helpers import signed_headers, tiny_png_bytes
 
 _MUTATING_ROUTES = (
@@ -65,6 +65,18 @@ def test_creative_providers_status_disabled_by_default(client: TestClient) -> No
     assert payload["videoProvider"]["provider"] == "disabled"
     assert payload["renderProvider"]["provider"] == "local"
     assert payload["renderProvider"]["enabled"] is True
+
+
+def test_multiple_sequential_requests_preserve_hmac_enforcement(client: TestClient) -> None:
+    unsigned = client.get("/internal/v1/creative/providers/status")
+    assert unsigned.status_code == 401
+
+    headers = signed_headers(
+        b"", method="GET", path="/internal/v1/creative/providers/status", idempotency_key=""
+    )
+    del headers["idempotency-key"]
+    signed = client.get("/internal/v1/creative/providers/status", headers=headers)
+    assert signed.status_code == 200
 
 
 def test_generate_image_disabled_shell(client: TestClient) -> None:
