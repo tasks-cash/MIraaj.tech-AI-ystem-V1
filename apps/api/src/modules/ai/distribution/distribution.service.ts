@@ -28,6 +28,7 @@ import {
   PROOF_VERIFICATION_EVENT_TYPE,
   PROOF_VERIFICATION_EVENT_VERSION,
   TASKS_CASH_DISTRIBUTION_API_VERSION,
+  proofResultChecksum,
   proofVerificationCompletedEventSchema,
 } from "./distribution.contracts.js";
 
@@ -347,7 +348,14 @@ export class DistributionService {
     const assignment = await DistributionAssignmentModel.findOne({ assignmentId: proof.assignmentId }).lean();
     if (!assignment) return;
     const eventId = `evt_${randomUUID()}`;
-    const payload = proofVerificationCompletedEventSchema.parse({ eventId, eventVersion: PROOF_VERIFICATION_EVENT_VERSION, eventType: PROOF_VERIFICATION_EVENT_TYPE, occurredAt: new Date().toISOString(), externalTaskId: assignment.externalTaskId, externalUserId: assignment.externalUserId, externalAssignmentId: assignment.externalAssignmentId, proofSubmissionId: proof.proofSubmissionId, verificationDecision: decision, verificationConfidence: attempt.scores?.overallVerificationScore ?? 0, rewardEligibilityRecommendation: reward, reasonCodes: attempt.reasonCodes ?? [], resultChecksum: attempt.resultChecksum, correlationId: proof.correlationId });
+    const verificationConfidence = attempt.scores?.overallVerificationScore ?? 0;
+    const reasonCodes = attempt.reasonCodes ?? [];
+    const resultChecksum = proofResultChecksum({
+      decision,
+      reasons: reasonCodes,
+      scores: { overallVerificationScore: verificationConfidence },
+    });
+    const payload = proofVerificationCompletedEventSchema.parse({ eventId, eventVersion: PROOF_VERIFICATION_EVENT_VERSION, eventType: PROOF_VERIFICATION_EVENT_TYPE, occurredAt: new Date().toISOString(), externalTaskId: assignment.externalTaskId, externalUserId: assignment.externalUserId, externalAssignmentId: assignment.externalAssignmentId, proofSubmissionId: proof.proofSubmissionId, verificationDecision: decision, verificationConfidence, rewardEligibilityRecommendation: reward, reasonCodes, resultChecksum, correlationId: proof.correlationId });
     await IntegrationOutboxEventModel.create({ eventId, eventType: "proof.verification.completed", payload, payloadChecksum: digest(JSON.stringify(payload)), nextAttemptAt: new Date(), createdBy: "proof-verification", correlationId: proof.correlationId });
     if (this.environment.TASKS_CASH_INTEGRATION_ENABLED) await this.queues.enqueueOutbox(eventId);
   }

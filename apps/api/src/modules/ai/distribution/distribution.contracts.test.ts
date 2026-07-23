@@ -42,6 +42,17 @@ describe("Tasks.cash distribution v1 contracts", () => {
     expect(proofVerificationCompletedEventSchema.safeParse(event).success).toBe(false);
   });
 
+  it("publishes a checksum reproducible from the public callback projection", () => {
+    const event = fixture("proof-verification-completed.json") as {
+      verificationDecision: string; verificationConfidence: number; reasonCodes: string[]; resultChecksum: string;
+    };
+    expect(proofResultChecksum({
+      decision: event.verificationDecision,
+      reasons: event.reasonCodes,
+      scores: { overallVerificationScore: event.verificationConfidence },
+    })).toBe(event.resultChecksum);
+  });
+
   it("canonicalizes nested objects, arrays, Unicode and Arabic deterministically", () => {
     const left = { z: ["طبيب الأسنان", { b: "é", a: 1 }], a: { y: false, x: "مرحبا" } };
     const right = { a: { x: "مرحبا", y: false }, z: ["طبيب الأسنان", { a: 1, b: "é" }] };
