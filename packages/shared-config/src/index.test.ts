@@ -25,9 +25,21 @@ describe("API environment policy", () => {
     const parsed = apiEnvironmentSchema.parse(baseEnvironment);
     expect(parsed.DISTRIBUTION_AUTO_VERIFY_ENABLED).toBe(false);
     expect(parsed.TASKS_CASH_INTEGRATION_ENABLED).toBe(false);
+    expect(parsed.DISTRIBUTION_PILOT_ENABLED).toBe(false);
+    expect(parsed.DISTRIBUTION_PUBLIC_POST_INSPECTION_ENABLED).toBe(false);
+    expect(parsed.DISTRIBUTION_EMERGENCY_ASSIGNMENT_STOP).toBe(false);
     expect(parsed.AI_PROOF_VERIFICATION_QUEUE_NAME).toBe(
       "miraaj.ai.proof-verification",
     );
+  });
+
+  it("provides differentiated retention and fail-closed pilot capacity defaults", () => {
+    const parsed = apiEnvironmentSchema.parse(baseEnvironment);
+    expect(parsed.DISTRIBUTION_PROOF_RETENTION_DAYS).toBe(90);
+    expect(parsed.DISTRIBUTION_REJECTED_PROOF_RETENTION_DAYS).toBe(30);
+    expect(parsed.DISTRIBUTION_DUPLICATE_PROOF_RETENTION_DAYS).toBe(60);
+    expect(parsed.DISTRIBUTION_FRAUD_PROOF_RETENTION_DAYS).toBe(180);
+    expect(parsed.DISTRIBUTION_PILOT_MAX_ACTIVE_ASSIGNMENTS).toBe(0);
   });
 
   it("fails closed when Tasks.cash is enabled without secure configuration", () => {
