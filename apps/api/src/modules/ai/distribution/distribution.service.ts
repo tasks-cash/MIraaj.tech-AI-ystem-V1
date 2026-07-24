@@ -402,13 +402,29 @@ export class DistributionService {
   async reviewProof(proofSubmissionId: string, input: Record<string, unknown>, actor: string) {
     if (!this.environment.DISTRIBUTION_HUMAN_REVIEW_ENABLED) throw new ConflictException("DISTRIBUTION_HUMAN_REVIEW_DISABLED");
     if (!String(input.reason ?? input.reviewerNote ?? "").trim()) throw new BadRequestException("REVIEW_REASON_REQUIRED");
-    const proof = await ProofSubmissionModel.findOne({ proofSubmissionId, status: "needs_review" });
-    if (!proof) throw new ConflictException("PROOF_NOT_AWAITING_REVIEW");
+    const current = await ProofSubmissionModel.findOne({ proofSubmissionId, status: "needs_review" }).lean();
+    if (!current) throw new ConflictException("PROOF_NOT_AWAITING_REVIEW");
+    const evidenceRevision = Number(input.evidenceRevision ?? current.evidenceRevision);
+    if (!Number.isInteger(evidenceRevision) || evidenceRevision !== current.evidenceRevision) {
+      throw new ConflictException("PROOF_REVIEW_REVISION_CONFLICT");
+    }
+    const idempotencyKeyHash = digest(String(input.idempotencyKey ?? `${proofSubmissionId}:${evidenceRevision}:${String(input.decision)}:${actor}`));
+    const existingReview = await ProofReviewModel.findOne({ idempotencyKeyHash }).lean();
+    if (existingReview) return existingReview;
+    const proof = await ProofSubmissionModel.findOneAndUpdate(
+      { proofSubmissionId, status: "needs_review", evidenceRevision },
+      { $set: { status: "verifying" } },
+      { new: true },
+    );
+    if (!proof) throw new ConflictException("PROOF_REVIEW_CONCURRENT_DECISION");
     const attempt = await ProofVerificationAttemptModel.findOne({ proofSubmissionId }).sort({ attemptNumber: -1 }).lean();
-    if (!attempt) throw new ConflictException("PROOF_ATTEMPT_MISSING");
+    if (!attempt) {
+      await ProofSubmissionModel.updateOne({ proofSubmissionId, status: "verifying" }, { $set: { status: "needs_review" } });
+      throw new ConflictException("PROOF_ATTEMPT_MISSING");
+    }
     const decision = String(input.decision);
     const reward = decision === "verified" ? "eligible" : decision === "fraudulent" ? "fraud_suspected" : decision === "duplicate" ? "duplicate" : decision === "request_more_evidence" ? "pending_review" : "not_eligible";
-    const review = await ProofReviewModel.create({ proofReviewId: `dpr_${randomUUID()}`, proofSubmissionId, verificationAttemptId: attempt.verificationAttemptId, decision, reasonCodes: input.reasonCodes ?? [], reviewerNote: input.reviewerNote, rewardEligibilityRecommendation: reward, reviewedBy: actor, reviewedAt: new Date(), createdBy: actor, correlationId: proof.correlationId });
+    const review = await ProofReviewModel.create({ proofReviewId: `dpr_${randomUUID()}`, proofSubmissionId, verificationAttemptId: attempt.verificationAttemptId, evidenceRevision, idempotencyKeyHash, decision, reasonCodes: input.reasonCodes ?? [], reviewerNote: input.reviewerNote, rewardEligibilityRecommendation: reward, reviewedBy: actor, reviewedAt: new Date(), createdBy: actor, correlationId: proof.correlationId });
     const finalStatus = decision === "verified" ? "verified" : decision === "request_more_evidence" ? "more_evidence_required" : decision === "duplicate" ? "duplicate" : decision === "fraudulent" ? "fraudulent" : "rejected";
     const retentionClass = decision === "verified" ? "accepted" : decision === "duplicate" ? "duplicate" : decision === "fraudulent" ? "fraud" : decision === "request_more_evidence" ? "pending" : "rejected";
     const days = retentionDays(retentionClass === "pending" ? "accepted" : retentionClass, {

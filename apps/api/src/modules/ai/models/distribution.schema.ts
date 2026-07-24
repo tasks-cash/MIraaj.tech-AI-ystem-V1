@@ -211,6 +211,8 @@ const proofReviewSchema = new Schema(
     proofReviewId: { type: String, required: true, unique: true, index: true },
     proofSubmissionId: { type: String, required: true, index: true },
     verificationAttemptId: { type: String, required: true },
+    evidenceRevision: { type: Number, required: true, min: 1 },
+    idempotencyKeyHash: { type: String, required: true, unique: true },
     decision: { type: String, enum: ["verified", "rejected", "request_more_evidence", "duplicate", "fraudulent", "cancelled"], required: true },
     reasonCodes: { type: [String], default: [] },
     reviewerNote: { type: String },
