@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import {
+  DeleteObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
@@ -158,5 +159,11 @@ export class MediaStorageService {
       throw new Error("PRIVATE_OBJECT_BODY_MISSING");
     }
     return Buffer.from(await response.Body.transformToByteArray());
+  }
+
+  async deletePrivateObject(objectKey: string): Promise<void> {
+    await this.client.send(
+      new DeleteObjectCommand({ Bucket: this.bucket, Key: objectKey }),
+    );
   }
 }

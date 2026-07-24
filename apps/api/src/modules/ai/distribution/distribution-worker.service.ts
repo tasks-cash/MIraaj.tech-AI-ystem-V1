@@ -124,7 +124,7 @@ export class DistributionWorkerService implements OnModuleInit, OnModuleDestroy 
   }
 
   private async deliverOutbox(job: Job<{ eventId: string }>) {
-    if (!this.environment.TASKS_CASH_INTEGRATION_ENABLED) return;
+    if (!this.environment.TASKS_CASH_INTEGRATION_ENABLED || this.environment.DISTRIBUTION_EMERGENCY_OUTBOX_STOP) return;
     const event = await IntegrationOutboxEventModel.findOneAndUpdate({ eventId: job.data.eventId, status: { $in: ["pending", "retry_scheduled"] } }, { $set: { status: "delivering", lastAttemptAt: new Date() }, $inc: { deliveryAttempts: 1 } }, { new: true });
     if (!event) return;
     const body = JSON.stringify(event.payload);

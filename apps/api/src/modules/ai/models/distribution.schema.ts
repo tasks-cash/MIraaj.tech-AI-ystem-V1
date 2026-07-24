@@ -12,7 +12,7 @@ const templateSchema = new Schema(
     campaignPackageId: { type: String, required: true, index: true },
     campaignPackageRevision: { type: Number, required: true, min: 1 },
     revision: { type: Number, required: true, default: 1 },
-    status: { type: String, enum: ["draft", "awaiting_review", "approved", "paused", "rejected", "archived"], default: "draft", index: true },
+    status: { type: String, enum: ["draft", "awaiting_review", "approved", "scheduled", "active", "paused", "rejected", "completed", "archived"], default: "draft", index: true },
     platform: { type: String, required: true },
     publicationType: { type: String, required: true },
     profession: { type: String, required: true },
@@ -26,16 +26,29 @@ const templateSchema = new Schema(
     groupMatchingRules: { type: [String], default: [] },
     requiredPostText: { type: String, required: true },
     requiredDisclosure: { type: String, default: "" },
+    prohibitedClaims: { type: [String], default: [] },
+    approvedDomains: { type: [String], default: [] },
+    copyVariantIds: { type: [String], default: [] },
+    textDirection: { type: String, enum: ["ltr", "rtl", "mixed"], default: "ltr" },
+    communityVisibility: { type: String, enum: ["public", "private", "either"], default: "either" },
     trackedLinkRequired: { type: Boolean, default: true },
     qrRequired: { type: Boolean, default: true },
     proofMarkerRequired: { type: Boolean, default: true },
     screenshotRequired: { type: Boolean, default: true },
+    headerRequired: { type: Boolean, default: true },
     postUrlRequirement: { type: String, enum: ["optional", "required", "forbidden"], default: "optional" },
     publicationWindowMinutes: { type: Number, required: true, min: 1 },
     proofDeadlineMinutes: { type: Number, required: true, min: 1 },
     verificationThresholds: { type: Schema.Types.Mixed, default: {} },
     requiresHumanReview: { type: Boolean, default: true },
     externalRewardRuleReference: { type: String, required: true },
+    externalTaskReference: { type: String, default: "" },
+    operationalCapacity: { type: Schema.Types.Mixed, default: {} },
+    scheduledAt: { type: Date },
+    activeAt: { type: Date },
+    completedAt: { type: Date },
+    pausedAt: { type: Date },
+    revisionHistory: { type: [Schema.Types.Mixed], default: [] },
     approvedBy: { type: String },
     approvedAt: { type: Date },
     archivedAt: { type: Date },
@@ -150,8 +163,10 @@ const proofSubmissionSchema = new Schema(
     assignmentId: { type: String, required: true, index: true },
     externalAssignmentId: { type: String, required: true, index: true },
     externalUserId: { type: String, required: true, index: true },
-    status: { type: String, enum: ["upload_pending", "submitted", "queued", "verifying", "needs_review", "verified", "rejected", "cancelled"], default: "upload_pending", index: true },
+    status: { type: String, enum: ["upload_pending", "submitted", "queued", "verifying", "needs_review", "more_evidence_required", "verified", "rejected", "duplicate", "fraudulent", "cancelled"], default: "upload_pending", index: true },
     evidence: { type: [Schema.Types.Mixed], default: [] },
+    evidenceRevision: { type: Number, default: 1, min: 1 },
+    evidenceAttempts: { type: [Schema.Types.Mixed], default: [] },
     postUrl: { type: String },
     claimedPublicationAt: { type: Date },
     claimedGroupName: { type: String },
@@ -159,6 +174,10 @@ const proofSubmissionSchema = new Schema(
     idempotencyKeyHash: { type: String, required: true, unique: true },
     submittedAt: { type: Date },
     retentionExpiresAt: { type: Date, required: true },
+    retentionClass: { type: String, enum: ["pending", "accepted", "rejected", "duplicate", "fraud"], default: "pending", index: true },
+    retentionHold: { type: Boolean, default: false, index: true },
+    legalHold: { type: Boolean, default: false, index: true },
+    cleanupState: { type: String, enum: ["retained", "eligible", "objects_deleted", "metadata_minimized"], default: "retained" },
     ...auditFields,
   },
   { timestamps: true, collection: "ai_proof_submissions" },
@@ -192,7 +211,7 @@ const proofReviewSchema = new Schema(
     proofReviewId: { type: String, required: true, unique: true, index: true },
     proofSubmissionId: { type: String, required: true, index: true },
     verificationAttemptId: { type: String, required: true },
-    decision: { type: String, enum: ["verified", "rejected", "request_more_evidence", "fraudulent", "cancelled"], required: true },
+    decision: { type: String, enum: ["verified", "rejected", "request_more_evidence", "duplicate", "fraudulent", "cancelled"], required: true },
     reasonCodes: { type: [String], default: [] },
     reviewerNote: { type: String },
     rewardEligibilityRecommendation: { type: String, enum: ["eligible", "not_eligible", "pending_review", "expired", "duplicate", "fraud_suspected"], required: true },
@@ -233,6 +252,25 @@ const tasksCashReplayNonceSchema = new Schema(
 );
 tasksCashReplayNonceSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
+const operationalMetricSchema = new Schema(
+  {
+    metricId: { type: String, required: true, unique: true, index: true },
+    capturedAt: { type: Date, required: true, index: true },
+    campaignPackageId: { type: String, index: true },
+    templateId: { type: String, index: true },
+    platform: { type: String, index: true },
+    country: { type: String, index: true },
+    language: { type: String, index: true },
+    profession: { type: String, index: true },
+    counters: { type: Schema.Types.Mixed, required: true },
+    queueHealth: { type: Schema.Types.Mixed, default: {} },
+    storageHealth: { type: Schema.Types.Mixed, default: {} },
+    ...auditFields,
+  },
+  { timestamps: true, collection: "ai_distribution_operational_metrics" },
+);
+operationalMetricSchema.index({ capturedAt: 1, templateId: 1 });
+
 function model(name: string, schema: Schema): Model<any> {
   return mongoose.models[name] ?? mongoose.model(name, schema);
 }
@@ -248,3 +286,4 @@ export const ProofVerificationAttemptModel = model("AiProofVerificationAttempt",
 export const ProofReviewModel = model("AiProofReview", proofReviewSchema);
 export const IntegrationOutboxEventModel = model("AiIntegrationOutboxEvent", outboxEventSchema);
 export const TasksCashReplayNonceModel = model("AiTasksCashReplayNonce", tasksCashReplayNonceSchema);
+export const DistributionOperationalMetricModel = model("AiDistributionOperationalMetric", operationalMetricSchema);

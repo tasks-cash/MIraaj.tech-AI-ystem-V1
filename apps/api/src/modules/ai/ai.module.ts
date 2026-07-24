@@ -45,6 +45,8 @@ import { CampaignReviewService } from "./campaigns/campaign-review.service.js";
 import { BrandProfileService } from "./campaigns/brand-profile.service.js";
 import { CampaignPolicyService } from "./campaigns/campaign-policy.service.js";
 import { CampaignController } from "./campaigns/campaign.controller.js";
+import { CampaignOperationsController } from "./campaigns/campaign-operations.controller.js";
+import { CampaignOperationsService } from "./campaigns/campaign-operations.service.js";
 import { CreativeQueueModule } from "./queue/creative-queue.module.js";
 import { DistributionQueueModule } from "./queue/distribution-queue.module.js";
 import { CreativeWorkerService } from "./creative/creative-worker.service.js";
@@ -86,6 +88,7 @@ import { TasksCashReplayService } from "./distribution/tasks-cash-replay.service
     BusinessProfileController,
     RecommendationController,
     CampaignController,
+    CampaignOperationsController,
     CreativeController,
     AuditEventsController,
     DistributionController,
@@ -127,6 +130,7 @@ import { TasksCashReplayService } from "./distribution/tasks-cash-replay.service
     CampaignWorkerService,
     BrandProfileService,
     CampaignPolicyService,
+    CampaignOperationsService,
     CreativeSeedService,
     CreativeSourceEligibilityService,
     CreativeValidationService,

@@ -14,6 +14,7 @@ import {
   DistributionAssignmentModel,
   DistributionCopyVariantModel,
   DistributionHeaderAssetModel,
+  DistributionOperationalMetricModel,
   DistributionTaskTemplateModel,
   IntegrationOutboxEventModel,
   ProofReviewModel,
@@ -31,6 +32,7 @@ import {
   proofResultChecksum,
   proofVerificationCompletedEventSchema,
 } from "./distribution.contracts.js";
+import { assertTemplateTransition, retentionDays } from "./distribution-operations.js";
 
 const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 const redirectWindows = new Map<string, { startedAt: number; count: number }>();
@@ -86,13 +88,31 @@ export class DistributionService {
     await template.save();
     return template;
   }
-  transitionTemplate(templateId: string, status: "approved" | "paused" | "archived", actor: string) {
-    const allowed = status === "approved" ? ["draft", "awaiting_review"] : status === "paused" ? ["approved"] : ["draft", "awaiting_review", "approved", "paused", "rejected"];
-    return DistributionTaskTemplateModel.findOneAndUpdate(
-      { templateId, status: { $in: allowed } },
-      { $set: { status, ...(status === "approved" ? { approvedBy: actor, approvedAt: new Date() } : {}), ...(status === "archived" ? { archivedAt: new Date() } : {}) } },
-      { new: true },
-    ).orFail(() => new ConflictException("DISTRIBUTION_TEMPLATE_TRANSITION_INVALID"));
+  async transitionTemplate(templateId: string, status: string, actor: string, input: Record<string, unknown> = {}) {
+    const template = await DistributionTaskTemplateModel.findOne({ templateId });
+    if (!template) throw new NotFoundException("DISTRIBUTION_TEMPLATE_NOT_FOUND");
+    try { assertTemplateTransition(template.status, status); } catch {
+      throw new ConflictException("DISTRIBUTION_TEMPLATE_TRANSITION_INVALID");
+    }
+    if (status === "scheduled" && !input.scheduledAt) throw new BadRequestException("DISTRIBUTION_SCHEDULE_REQUIRED");
+    template.status = status;
+    template.revision += 1;
+    if (status === "approved") { template.approvedBy = actor; template.approvedAt = new Date(); }
+    if (status === "scheduled") template.scheduledAt = new Date(String(input.scheduledAt));
+    if (status === "active") template.activeAt = new Date();
+    if (status === "paused") template.pausedAt = new Date();
+    if (status === "completed") template.completedAt = new Date();
+    if (status === "archived") template.archivedAt = new Date();
+    template.revisionHistory.push({ revision: template.revision, status, actor, reason: input.reason, changedAt: new Date() });
+    await template.save();
+    return template;
+  }
+
+  async duplicateTemplate(templateId: string, actor: string) {
+    const source = await this.getTemplate(templateId);
+    const { _id, __v, templateId: ignored, status, approvedAt, approvedBy, archivedAt, createdAt, updatedAt, ...copy } = source as Record<string, unknown>;
+    void _id; void __v; void ignored; void status; void approvedAt; void approvedBy; void archivedAt; void createdAt; void updatedAt;
+    return DistributionTaskTemplateModel.create({ ...copy, templateId: `dst_${randomUUID()}`, status: "draft", revision: 1, revisionHistory: [], createdBy: actor, correlationId: randomUUID() });
   }
 
   async createCopy(templateId: string, input: Record<string, unknown>, actor: string, source: "manual" | "approved_campaign" = "manual") {
@@ -140,12 +160,16 @@ export class DistributionService {
   }
 
   async createAssignment(input: Record<string, unknown>, actor: string, idempotencyKey: string) {
+    if (!this.environment.DISTRIBUTION_ASSIGNMENT_CREATION_ENABLED || this.environment.DISTRIBUTION_EMERGENCY_ASSIGNMENT_STOP) {
+      throw new ConflictException("DISTRIBUTION_ASSIGNMENT_CREATION_DISABLED");
+    }
     if (!idempotencyKey) throw new BadRequestException("IDEMPOTENCY_KEY_REQUIRED");
     const idempotencyKeyHash = digest(idempotencyKey);
     const existing = await DistributionAssignmentModel.findOne({ idempotencyKeyHash });
     if (existing) return this.assignmentPackage(existing.assignmentId);
-    const template = await DistributionTaskTemplateModel.findOne({ templateId: String(input.templateId), status: "approved" }).lean();
+    const template = await DistributionTaskTemplateModel.findOne({ templateId: String(input.templateId), status: { $in: ["approved", "active"] } }).lean();
     if (!template) throw new BadRequestException("APPROVED_DISTRIBUTION_TEMPLATE_REQUIRED");
+    await this.enforcePilotLimits(template, input);
     const copy = await DistributionCopyVariantModel.findOne({ copyVariantId: String(input.copyVariantId), templateId: template.templateId, status: "approved" }).lean();
     if (!copy) throw new BadRequestException("APPROVED_DISTRIBUTION_COPY_REQUIRED");
     const target = this.allowedTarget(String(input.targetUrl ?? ""));
@@ -187,6 +211,33 @@ export class DistributionService {
       DistributionHeaderAssetModel.create({ headerAssetId, assignmentId, objectKey: headerObjectKey, checksum: String(assets.headerSha256), qrDecodeVerified: assets.headerQrDecodeVerified === true, direction: copy.direction, width: Number(assets.width), height: Number(assets.height), expiresAt, provenance: { renderer: "pillow-local", qrAssetId, proofMarker }, createdBy: actor, correlationId }),
     ]);
     return this.assignmentPackage(assignmentId);
+  }
+
+  private async enforcePilotLimits(template: Record<string, any>, input: Record<string, unknown>) {
+    if (!this.environment.DISTRIBUTION_PILOT_ENABLED) return;
+    const list = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
+    const campaignAllowlist = list(this.environment.DISTRIBUTION_PILOT_CAMPAIGN_ALLOWLIST);
+    const countries = list(this.environment.DISTRIBUTION_PILOT_ALLOWED_COUNTRIES);
+    const languages = list(this.environment.DISTRIBUTION_PILOT_ALLOWED_LANGUAGES);
+    const platforms = list(this.environment.DISTRIBUTION_PILOT_ALLOWED_PLATFORMS);
+    const country = String(input.country ?? template.countryCodes[0] ?? "");
+    const language = String(template.languages[0] ?? "");
+    if (campaignAllowlist.length && !campaignAllowlist.includes(String(template.campaignPackageId))) throw new BadRequestException("PILOT_CAMPAIGN_NOT_ALLOWLISTED");
+    if (countries.length && !countries.includes(country)) throw new BadRequestException("PILOT_COUNTRY_NOT_ALLOWED");
+    if (languages.length && !languages.includes(language)) throw new BadRequestException("PILOT_LANGUAGE_NOT_ALLOWED");
+    if (platforms.length && !platforms.includes(String(template.platform))) throw new BadRequestException("PILOT_PLATFORM_NOT_ALLOWED");
+    const active = { status: { $in: ["active", "awaiting_proof", "verification_pending", "needs_review"] } };
+    const [all, task, user] = await Promise.all([
+      DistributionAssignmentModel.countDocuments(active),
+      DistributionAssignmentModel.countDocuments({ ...active, externalTaskId: String(input.externalTaskId) }),
+      DistributionAssignmentModel.countDocuments({ ...active, externalUserId: String(input.externalUserId) }),
+    ]);
+    const exceeded = (current: number, maximum: number) => maximum > 0 && current >= maximum;
+    if (exceeded(all, this.environment.DISTRIBUTION_PILOT_MAX_ACTIVE_ASSIGNMENTS) ||
+        exceeded(task, this.environment.DISTRIBUTION_PILOT_MAX_ASSIGNMENTS_PER_EXTERNAL_TASK) ||
+        exceeded(user, this.environment.DISTRIBUTION_PILOT_MAX_ASSIGNMENTS_PER_EXTERNAL_USER)) {
+      throw new ConflictException("DISTRIBUTION_PILOT_CAPACITY_REACHED");
+    }
   }
 
   async assignmentPackage(id: string, externalUserId?: string) {
@@ -250,6 +301,9 @@ export class DistributionService {
   revokeTrackedLink(id: string) { return TrackedLinkModel.findOneAndUpdate({ trackedLinkId: id }, { $set: { status: "revoked", revokedAt: new Date() } }, { new: true }).orFail(() => new NotFoundException("TRACKED_LINK_NOT_FOUND")); }
 
   async createProofUploadSession(input: Record<string, unknown>, actor: string, idempotencyKey: string) {
+    if (!this.environment.DISTRIBUTION_PROOF_PROCESSING_ENABLED || this.environment.DISTRIBUTION_EMERGENCY_PROOF_STOP) {
+      throw new ConflictException("DISTRIBUTION_PROOF_PROCESSING_DISABLED");
+    }
     const assignment = await DistributionAssignmentModel.findOne({ externalAssignmentId: String(input.externalAssignmentId), externalUserId: String(input.externalUserId), status: { $in: ["active", "awaiting_proof"] }, proofDeadlineAt: { $gt: new Date() } }).lean();
     if (!assignment) throw new BadRequestException("PROOF_ASSIGNMENT_INVALID_OR_EXPIRED");
     const screenshotCount = Number(input.screenshotCount ?? 1);
@@ -264,7 +318,7 @@ export class DistributionService {
       return { evidenceId: `ev_${randomUUID()}`, kind: "screenshot", objectKey, contentType: "image/png", uploadUrl: upload.uploadUrl, uploadExpiresAt: upload.expiresAt };
     }));
     const retentionExpiresAt = new Date(Date.now() + this.environment.DISTRIBUTION_PROOF_RETENTION_DAYS * 86_400_000);
-    await ProofSubmissionModel.create({ proofSubmissionId, assignmentId: assignment.assignmentId, externalAssignmentId: assignment.externalAssignmentId, externalUserId: assignment.externalUserId, evidence, postUrl: input.postUrl, claimedPublicationAt: input.claimedPublicationAt, claimedGroupName: input.claimedGroupName, userNote: input.userNote, idempotencyKeyHash: hash, retentionExpiresAt, createdBy: actor, correlationId: String(input.correlationId ?? randomUUID()) });
+    await ProofSubmissionModel.create({ proofSubmissionId, assignmentId: assignment.assignmentId, externalAssignmentId: assignment.externalAssignmentId, externalUserId: assignment.externalUserId, evidence, evidenceAttempts: [{ revision: 1, evidence: evidence.map((item) => ({ evidenceId: item.evidenceId, kind: item.kind, objectKey: item.objectKey, contentType: item.contentType, uploadExpiresAt: item.uploadExpiresAt })), createdAt: new Date(), actor }], postUrl: input.postUrl, claimedPublicationAt: input.claimedPublicationAt, claimedGroupName: input.claimedGroupName, userNote: input.userNote, idempotencyKeyHash: hash, retentionExpiresAt, createdBy: actor, correlationId: String(input.correlationId ?? randomUUID()) });
     return {
       apiVersion: TASKS_CASH_DISTRIBUTION_API_VERSION,
       proofSubmissionId,
@@ -277,6 +331,25 @@ export class DistributionService {
       })),
       expiresAt: evidence[0]?.uploadExpiresAt,
     };
+  }
+
+  async addEvidence(proofSubmissionId: string, input: Record<string, unknown>, actor: string) {
+    const proof = await ProofSubmissionModel.findOne({ proofSubmissionId, status: "more_evidence_required" });
+    if (!proof) throw new ConflictException("PROOF_ADDITIONAL_EVIDENCE_NOT_REQUESTED");
+    const count = Number(input.screenshotCount ?? 1);
+    if (count < 1 || count > this.environment.DISTRIBUTION_MAX_SCREENSHOTS) throw new BadRequestException("PROOF_SCREENSHOT_COUNT_INVALID");
+    const revision = proof.evidenceRevision + 1;
+    const evidence = await Promise.all(Array.from({ length: count }, async (_, index) => {
+      const objectKey = `distribution/proofs/${proof.assignmentId}/${proofSubmissionId}/revision-${revision}-${index + 1}`;
+      const upload = await this.storage.createPresignedUpload({ objectKey, contentType: "image/png", contentLength: Number(input.contentLength ?? this.environment.DISTRIBUTION_MAX_SCREENSHOT_BYTES) });
+      return { evidenceId: `ev_${randomUUID()}`, kind: "screenshot", objectKey, contentType: "image/png", uploadUrl: upload.uploadUrl, uploadExpiresAt: upload.expiresAt, revision };
+    }));
+    proof.evidenceRevision = revision;
+    proof.evidence.push(...evidence);
+    proof.evidenceAttempts.push({ revision, evidence: evidence.map((item) => ({ evidenceId: item.evidenceId, kind: item.kind, objectKey: item.objectKey, contentType: item.contentType, uploadExpiresAt: item.uploadExpiresAt, revision: item.revision })), createdAt: new Date(), actor });
+    proof.status = "upload_pending";
+    await proof.save();
+    return { proofSubmissionId, evidenceRevision: revision, evidence: evidence.map((item) => ({ evidenceId: item.evidenceId, kind: item.kind, contentType: item.contentType, uploadUrl: item.uploadUrl, uploadExpiresAt: item.uploadExpiresAt, revision: item.revision })) };
   }
 
   async completeProof(proofSubmissionId: string, externalUserId: string) {
@@ -327,21 +400,78 @@ export class DistributionService {
   }
 
   async reviewProof(proofSubmissionId: string, input: Record<string, unknown>, actor: string) {
+    if (!this.environment.DISTRIBUTION_HUMAN_REVIEW_ENABLED) throw new ConflictException("DISTRIBUTION_HUMAN_REVIEW_DISABLED");
+    if (!String(input.reason ?? input.reviewerNote ?? "").trim()) throw new BadRequestException("REVIEW_REASON_REQUIRED");
     const proof = await ProofSubmissionModel.findOne({ proofSubmissionId, status: "needs_review" });
     if (!proof) throw new ConflictException("PROOF_NOT_AWAITING_REVIEW");
     const attempt = await ProofVerificationAttemptModel.findOne({ proofSubmissionId }).sort({ attemptNumber: -1 }).lean();
     if (!attempt) throw new ConflictException("PROOF_ATTEMPT_MISSING");
     const decision = String(input.decision);
-    const reward = decision === "verified" ? "eligible" : decision === "fraudulent" ? "fraud_suspected" : decision === "request_more_evidence" ? "pending_review" : "not_eligible";
+    const reward = decision === "verified" ? "eligible" : decision === "fraudulent" ? "fraud_suspected" : decision === "duplicate" ? "duplicate" : decision === "request_more_evidence" ? "pending_review" : "not_eligible";
     const review = await ProofReviewModel.create({ proofReviewId: `dpr_${randomUUID()}`, proofSubmissionId, verificationAttemptId: attempt.verificationAttemptId, decision, reasonCodes: input.reasonCodes ?? [], reviewerNote: input.reviewerNote, rewardEligibilityRecommendation: reward, reviewedBy: actor, reviewedAt: new Date(), createdBy: actor, correlationId: proof.correlationId });
-    const finalStatus = decision === "verified" ? "verified" : decision === "request_more_evidence" ? "awaiting_proof" : "rejected";
+    const finalStatus = decision === "verified" ? "verified" : decision === "request_more_evidence" ? "more_evidence_required" : decision === "duplicate" ? "duplicate" : decision === "fraudulent" ? "fraudulent" : "rejected";
+    const retentionClass = decision === "verified" ? "accepted" : decision === "duplicate" ? "duplicate" : decision === "fraudulent" ? "fraud" : decision === "request_more_evidence" ? "pending" : "rejected";
+    const days = retentionDays(retentionClass === "pending" ? "accepted" : retentionClass, {
+      accepted: this.environment.DISTRIBUTION_PROOF_RETENTION_DAYS,
+      rejected: this.environment.DISTRIBUTION_REJECTED_PROOF_RETENTION_DAYS,
+      duplicate: this.environment.DISTRIBUTION_DUPLICATE_PROOF_RETENTION_DAYS,
+      fraud: this.environment.DISTRIBUTION_FRAUD_PROOF_RETENTION_DAYS,
+    });
     await Promise.all([
-      ProofSubmissionModel.updateOne({ proofSubmissionId }, { $set: { status: finalStatus === "awaiting_proof" ? "submitted" : finalStatus } }),
+      ProofSubmissionModel.updateOne({ proofSubmissionId }, { $set: { status: finalStatus, retentionClass, retentionExpiresAt: new Date(Date.now() + days * 86_400_000) } }),
       DistributionAssignmentModel.updateOne({ assignmentId: proof.assignmentId }, { $set: { status: finalStatus, latestVerificationDecision: decision, rewardEligibilityRecommendation: reward } }),
     ]);
     const eventDecision = decision === "verified" ? "verified" : decision === "request_more_evidence" ? "needs_review" : "rejected";
     await this.createOutboxEvent(proof, eventDecision, reward, attempt);
     return review;
+  }
+
+  async operationalMetrics(filters: Record<string, unknown> = {}) {
+    const assignmentFilter: Record<string, unknown> = {};
+    for (const key of ["templateId", "platform", "country", "language"]) if (filters[key]) assignmentFilter[key] = filters[key];
+    const [assignmentStatuses, proofStatuses, outboxStatuses, queueHealth] = await Promise.all([
+      DistributionAssignmentModel.aggregate([{ $match: assignmentFilter }, { $group: { _id: "$status", count: { $sum: 1 } } }]),
+      ProofSubmissionModel.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
+      IntegrationOutboxEventModel.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
+      this.queues.getQueueStats(),
+    ]);
+    const counters = {
+      assignments: Object.fromEntries(assignmentStatuses.map((item) => [item._id, item.count])),
+      proofs: Object.fromEntries(proofStatuses.map((item) => [item._id, item.count])),
+      outbox: Object.fromEntries(outboxStatuses.map((item) => [item._id, item.count])),
+    };
+    if (this.environment.DISTRIBUTION_HISTORICAL_METRICS_ENABLED) {
+      await DistributionOperationalMetricModel.create({ metricId: `dom_${randomUUID()}`, capturedAt: new Date(), ...filters, counters, queueHealth, storageHealth: { privateBucket: this.storage.bucket }, createdBy: "metrics", correlationId: randomUUID() });
+    }
+    return { counters, queueHealth, callbackEnabled: this.environment.TASKS_CASH_INTEGRATION_ENABLED, autoVerifyEnabled: this.environment.DISTRIBUTION_AUTO_VERIFY_ENABLED };
+  }
+
+  async pilotStatus() {
+    const metrics = await this.operationalMetrics();
+    return {
+      enabled: this.environment.DISTRIBUTION_PILOT_ENABLED,
+      mandatoryHumanReview: true,
+      assignmentStop: this.environment.DISTRIBUTION_EMERGENCY_ASSIGNMENT_STOP,
+      proofStop: this.environment.DISTRIBUTION_EMERGENCY_PROOF_STOP,
+      outboxStop: this.environment.DISTRIBUTION_EMERGENCY_OUTBOX_STOP,
+      tasksCashCallbackEnabled: this.environment.TASKS_CASH_INTEGRATION_ENABLED,
+      ...metrics,
+    };
+  }
+
+  async cleanupExpiredProofs(actor: string) {
+    const expired = await ProofSubmissionModel.find({ retentionExpiresAt: { $lte: new Date() }, retentionHold: false, legalHold: false, status: { $nin: ["needs_review", "more_evidence_required", "verifying"] }, cleanupState: { $ne: "metadata_minimized" } });
+    let objectsDeleted = 0;
+    for (const proof of expired) {
+      for (const item of proof.evidence as Array<{ objectKey?: string }>) {
+        if (item.objectKey) { await this.storage.deletePrivateObject(item.objectKey); objectsDeleted += 1; }
+      }
+      proof.evidence = [];
+      proof.cleanupState = "metadata_minimized";
+      proof.evidenceAttempts = proof.evidenceAttempts.map((attempt: Record<string, unknown>) => ({ ...attempt, evidence: "deleted_by_retention_policy" }));
+      await proof.save();
+    }
+    return { actor, proofsMinimized: expired.length, objectsDeleted };
   }
 
   async createOutboxEvent(proof: Record<string, any>, decision: string, reward: string, attempt: Record<string, any>) {
