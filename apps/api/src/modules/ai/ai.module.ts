@@ -69,6 +69,11 @@ import { DistributionService } from "./distribution/distribution.service.js";
 import { DistributionWorkerService } from "./distribution/distribution-worker.service.js";
 import { TasksCashHmacGuard } from "./distribution/tasks-cash-hmac.guard.js";
 import { TasksCashReplayService } from "./distribution/tasks-cash-replay.service.js";
+import {
+  CampaignTaskAdminController,
+  CampaignTaskParticipantController,
+} from "./campaign-tasks/campaign-task.controller.js";
+import { CampaignTaskService } from "./campaign-tasks/campaign-task.service.js";
 
 @Module({
   imports: [
@@ -94,6 +99,8 @@ import { TasksCashReplayService } from "./distribution/tasks-cash-replay.service
     DistributionController,
     TrackedLinkController,
     TasksCashDistributionController,
+    CampaignTaskAdminController,
+    CampaignTaskParticipantController,
   ],
   providers: [
     AiService,
@@ -146,6 +153,7 @@ import { TasksCashReplayService } from "./distribution/tasks-cash-replay.service
     DistributionWorkerService,
     TasksCashHmacGuard,
     TasksCashReplayService,
+    CampaignTaskService,
   ],
   exports: [
     AiService,
