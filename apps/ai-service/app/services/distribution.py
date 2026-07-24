@@ -34,12 +34,28 @@ def _decode_qr(image_bytes: bytes) -> list[str]:
     image = cv2.imdecode(array, cv2.IMREAD_COLOR)
     if image is None:
         return []
-    detector = cv2.QRCodeDetector()
-    ok, decoded, _, _ = detector.detectAndDecodeMulti(image)
-    if ok:
-        return [value for value in decoded if value]
-    value, _, _ = detector.detectAndDecode(image)
-    return [value] if value else []
+    variants = [image]
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    variants.extend(
+        [
+            gray,
+            cv2.resize(gray, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_NEAREST),
+            cv2.copyMakeBorder(gray, 32, 32, 32, 32, cv2.BORDER_CONSTANT, value=255),
+        ]
+    )
+    _, threshold = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    variants.append(threshold)
+    for candidate in variants:
+        detector = cv2.QRCodeDetector()
+        ok, decoded, _, _ = detector.detectAndDecodeMulti(candidate)
+        if ok:
+            values = [value for value in decoded if value]
+            if values:
+                return values
+        value, _, _ = detector.detectAndDecode(candidate)
+        if value:
+            return [value]
+    return []
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -55,16 +71,56 @@ def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
+def _render_qr_matrix(matrix: np.ndarray, target_width: int) -> np.ndarray:
+    quiet_modules = 4
+    modules = matrix.shape[0] + (quiet_modules * 2)
+    pixels_per_module = target_width // modules
+    if pixels_per_module < 2:
+        raise ValueError("QR_PAYLOAD_EXCEEDS_RENDER_CAPACITY")
+    bordered = cv2.copyMakeBorder(
+        matrix,
+        quiet_modules,
+        quiet_modules,
+        quiet_modules,
+        quiet_modules,
+        cv2.BORDER_CONSTANT,
+        value=255,
+    )
+    rendered_width = modules * pixels_per_module
+    rendered = cv2.resize(
+        bordered,
+        (rendered_width, rendered_width),
+        interpolation=cv2.INTER_NEAREST,
+    )
+    padding = target_width - rendered_width
+    before = padding // 2
+    after = padding - before
+    return cv2.copyMakeBorder(
+        rendered,
+        before,
+        after,
+        before,
+        after,
+        cv2.BORDER_CONSTANT,
+        value=255,
+    )
+
+
 def generate_distribution_assets(
     payload: DistributionAssetInput, settings: Settings
 ) -> DistributionAssetResponse:
-    encoder = cv2.QRCodeEncoder_create()  # type: ignore[attr-defined]
+    params = cv2.QRCodeEncoder_Params()  # type: ignore[attr-defined]
+    params.correction_level = {
+        "L": cv2.QRCodeEncoder_CORRECT_LEVEL_L,
+        "M": cv2.QRCodeEncoder_CORRECT_LEVEL_M,
+        "Q": cv2.QRCodeEncoder_CORRECT_LEVEL_Q,
+        "H": cv2.QRCodeEncoder_CORRECT_LEVEL_H,
+    }[settings.DISTRIBUTION_QR_ERROR_CORRECTION_LEVEL]
+    encoder = cv2.QRCodeEncoder_create(params)  # type: ignore[attr-defined]
     matrix = encoder.encode(payload.trackedUrl)
-    quiet = 4
-    matrix = cv2.copyMakeBorder(matrix, quiet, quiet, quiet, quiet, cv2.BORDER_CONSTANT, value=255)
     qr_width = settings.DISTRIBUTION_QR_WIDTH
-    matrix = cv2.resize(matrix, (qr_width, qr_width), interpolation=cv2.INTER_NEAREST)
-    ok, encoded = cv2.imencode(".png", matrix)
+    rendered_qr = _render_qr_matrix(matrix, qr_width)
+    ok, encoded = cv2.imencode(".png", rendered_qr)
     if not ok:
         raise ValueError("QR_RENDER_FAILED")
     qr_bytes = encoded.tobytes()
@@ -75,11 +131,8 @@ def generate_distribution_assets(
     header = Image.new("RGB", (payload.width, payload.height), "#071b33")
     draw = ImageDraw.Draw(header)
     qr_size = min(payload.height - 80, payload.width // 3)
-    qr_image = (
-        Image.open(io.BytesIO(qr_bytes))
-        .convert("RGB")
-        .resize((qr_size, qr_size), Image.Resampling.NEAREST)
-    )
+    header_qr = _render_qr_matrix(matrix, qr_size)
+    qr_image = Image.fromarray(header_qr).convert("RGB")
     qr_x = payload.width - qr_size - 40
     qr_y = (payload.height - qr_size) // 2
     draw.rounded_rectangle(
@@ -195,8 +248,8 @@ def verify_proof(payload: ProofVerifyInput, settings: Settings) -> ProofVerifyRe
     group_score = max((_ratio(group, text) for group in payload.expectedGroups), default=0.5)
     text_score = _ratio(payload.approvedPostText, text)
     exact_duplicate = any(checksum in payload.knownChecksums for checksum in checksums)
-    perceptual_duplicate = any(
-        value in payload.knownPerceptualHashes for value in perceptual_hashes
+    perceptual_duplicate = _matches_known_perceptual_hash(
+        perceptual_hashes, payload.knownPerceptualHashes
     )
     duplicate_risk = 1.0 if exact_duplicate else 0.8 if perceptual_duplicate else 0.0
     manipulation_risk = max((float(str(item["risk"])) for item in indicators), default=0.0)
@@ -295,3 +348,20 @@ def verify_proof(payload: ProofVerifyInput, settings: Settings) -> ProofVerifyRe
         resultChecksum=_result_checksum(decision, scores, reasons),
         durationMs=max(0, round((perf_counter() - started) * 1000)),
     )
+
+
+def _matches_known_perceptual_hash(
+    observed: list[str], known: list[str], *, maximum_distance: int = 8
+) -> bool:
+    for value in observed:
+        try:
+            candidate = imagehash.hex_to_hash(value)
+        except ValueError:
+            continue
+        for prior in known:
+            try:
+                if candidate - imagehash.hex_to_hash(prior) <= maximum_distance:
+                    return True
+            except ValueError:
+                continue
+    return False
