@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { notFound } from "next/navigation";
+import { requireCampaignTaskOperator } from "@/lib/campaign-task-auth";
 import { campaignTaskApi, type AssignmentPackageView } from "@/lib/campaign-task-api";
 
 export default async function AssignmentPortal({
@@ -9,7 +9,7 @@ export default async function AssignmentPortal({
   params: Promise<{ locale: string; assignmentId: string }>;
   searchParams: Promise<{ tenant?: string; participant?: string }>;
 }) {
-  if (process.env.CAMPAIGN_TASK_PARTICIPANT_PORTAL_ENABLED !== "true") notFound();
+  await requireCampaignTaskOperator("participant");
   const { locale, assignmentId } = await params;
   const { tenant = "internal-pilot", participant = "" } = await searchParams;
   const assignment = await campaignTaskApi<AssignmentPackageView>(`/api/ai/distribution/assignments/${assignmentId}`, { tenantId: tenant, participantId: participant });

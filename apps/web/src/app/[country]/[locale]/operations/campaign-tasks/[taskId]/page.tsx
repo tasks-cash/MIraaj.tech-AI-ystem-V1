@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { requireCampaignTaskOperator } from "@/lib/campaign-task-auth";
 import { campaignTaskApi, type CampaignTaskView } from "@/lib/campaign-task-api";
 import { reviewCampaignProof, transitionCampaignTask } from "../actions";
 
@@ -19,7 +19,7 @@ export default async function CampaignTaskDetail({
   params: Promise<{ country: string; locale: string; taskId: string }>;
   searchParams: Promise<{ tenant?: string }>;
 }) {
-  if (process.env.CAMPAIGN_TASK_ADMIN_UI_ENABLED === "false") notFound();
+  await requireCampaignTaskOperator("admin");
   const { country, locale, taskId } = await params;
   const { tenant = "internal-pilot" } = await searchParams;
   const [task, statistics, assignments, proofs] = await Promise.all([

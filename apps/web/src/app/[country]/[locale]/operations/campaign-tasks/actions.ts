@@ -4,11 +4,13 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { campaignTaskApi, type CampaignTaskView } from "@/lib/campaign-task-api";
+import { requireCampaignTaskOperator } from "@/lib/campaign-task-auth";
 
 const text = (form: FormData, name: string) => String(form.get(name) ?? "").trim();
 const list = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
 
 export async function createCampaignTask(form: FormData) {
+  await requireCampaignTaskOperator("admin");
   const country = text(form, "country");
   const locale = text(form, "locale");
   const tenantId = text(form, "tenantId");
@@ -57,6 +59,7 @@ export async function createCampaignTask(form: FormData) {
 }
 
 export async function transitionCampaignTask(form: FormData) {
+  await requireCampaignTaskOperator("admin");
   const country = text(form, "country");
   const locale = text(form, "locale");
   const tenantId = text(form, "tenantId");
@@ -72,6 +75,7 @@ export async function transitionCampaignTask(form: FormData) {
 }
 
 export async function reviewCampaignProof(form: FormData) {
+  await requireCampaignTaskOperator("admin");
   const country = text(form, "country");
   const locale = text(form, "locale");
   const tenantId = text(form, "tenantId");
