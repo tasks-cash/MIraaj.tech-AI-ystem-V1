@@ -68,4 +68,22 @@ describe("CampaignTaskRecurringService", () => {
     const result = await service.recover("t1");
     expect(result.recovered).toBeGreaterThanOrEqual(1);
   });
+
+  it("skips activation when parent is paused", async () => {
+    const service = new CampaignTaskRecurringService(new FakeQueue() as unknown as CampaignTaskRecurringQueueService);
+    const occurrence = { publicId: "occ-1", tenantId: "t1", campaignTaskId: "task-1", status: "scheduled", assignmentWindowEnd: new Date(), save: vi.fn() };
+    vi.spyOn(CampaignTaskOccurrenceModel, "findOne").mockResolvedValueOnce(occurrence as any);
+    vi.spyOn(CampaignTaskModel, "findOne").mockReturnValue({ lean: () => Promise.resolve({ publicId: "task-1", tenantId: "t1", status: "paused", emergencyStop: false, recurrenceConfiguration: { allowOverlap: true } }) } as any);
+    const result = await service.activate("occ-1");
+    expect(result.status).toBe("skipped");
+  });
+
+  it("skips activation when parent is cancelled", async () => {
+    const service = new CampaignTaskRecurringService(new FakeQueue() as unknown as CampaignTaskRecurringQueueService);
+    const occurrence = { publicId: "occ-1", tenantId: "t1", campaignTaskId: "task-1", status: "scheduled", assignmentWindowEnd: new Date(), save: vi.fn() };
+    vi.spyOn(CampaignTaskOccurrenceModel, "findOne").mockResolvedValueOnce(occurrence as any);
+    vi.spyOn(CampaignTaskModel, "findOne").mockReturnValue({ lean: () => Promise.resolve({ publicId: "task-1", tenantId: "t1", status: "cancelled", emergencyStop: false, recurrenceConfiguration: { allowOverlap: true } }) } as any);
+    const result = await service.activate("occ-1");
+    expect(result.status).toBe("skipped");
+  });
 });
