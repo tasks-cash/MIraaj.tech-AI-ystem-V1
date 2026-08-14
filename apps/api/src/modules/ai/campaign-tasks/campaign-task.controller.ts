@@ -15,9 +15,12 @@ import {
 import { AI_PERMISSIONS } from "@miraaj/shared-config";
 import { RequireAiPermission } from "../decorators/require-ai-permission.decorator.js";
 import { AdminAuthGuard } from "../guards/admin-auth.guard.js";
+import { CampaignTaskParticipantAuthGuard } from "../guards/campaign-task-participant-auth.guard.js";
 import { AiPermissionGuard } from "../guards/ai-permission.guard.js";
+import type { CampaignTaskParticipantRequest } from "../types/campaign-task-participant-request.js";
 import { DistributionService } from "../distribution/distribution.service.js";
 import { CampaignTaskService } from "./campaign-task.service.js";
+import { CampaignTaskRecurringService } from "./campaign-task-recurring.service.js";
 
 interface RequestHeaders {
   "x-tenant-id"?: string;
@@ -40,7 +43,7 @@ const revision = (value: string | undefined) => {
 @Controller("api/admin/ai/campaign-tasks")
 @UseGuards(AdminAuthGuard, AiPermissionGuard)
 export class CampaignTaskAdminController {
-  constructor(@Inject(CampaignTaskService) private readonly service: CampaignTaskService) {}
+  constructor(@Inject(CampaignTaskService) private readonly service: CampaignTaskService, @Inject(CampaignTaskRecurringService) private readonly recurring: CampaignTaskRecurringService) {}
   private actor(req: { adminUserId?: string }) { return req.adminUserId ?? "temporary-admin"; }
   private tenant(headers: RequestHeaders) { return required(headers["x-tenant-id"], "TENANT_ID_REQUIRED"); }
 
@@ -141,74 +144,96 @@ export class CampaignTaskAdminController {
   reconcile(@Param("id") id: string, @Headers() headers: RequestHeaders, @Req() req: { adminUserId?: string }) {
     return this.service.reconcile(id, this.tenant(headers), this.actor(req));
   }
+  @Get(":id/occurrences/preview") @RequireAiPermission(AI_PERMISSIONS.CAMPAIGN_TASKS_READ)
+  occurrencePreview(@Param("id") id: string, @Headers() headers: RequestHeaders, @Query("count") count?: string) {
+    return this.recurring.preview(id, this.tenant(headers), Number(count ?? 10));
+  }
+  @Get(":id/occurrences") @RequireAiPermission(AI_PERMISSIONS.CAMPAIGN_TASKS_READ)
+  occurrenceHistory(@Param("id") id: string, @Headers() headers: RequestHeaders) {
+    return this.recurring.history(id, this.tenant(headers));
+  }
+  @Post(":id/occurrences/plan") @RequireAiPermission(AI_PERMISSIONS.CAMPAIGN_TASKS_ACTIVATE)
+  occurrencePlan(@Param("id") id: string, @Headers() headers: RequestHeaders, @Req() req: { adminUserId?: string }) {
+    return this.recurring.plan(id, this.tenant(headers), this.actor(req));
+  }
+  @Post(":id/occurrences/:occurrenceId/cancel") @RequireAiPermission(AI_PERMISSIONS.CAMPAIGN_TASKS_CANCEL)
+  occurrenceCancel(@Param("id") id: string, @Param("occurrenceId") occurrenceId: string, @Headers() headers: RequestHeaders, @Req() req: { adminUserId?: string }) {
+    return this.recurring.cancel(id, occurrenceId, this.tenant(headers), this.actor(req));
+  }
+  @Post(":id/occurrences/:occurrenceId/retry") @RequireAiPermission(AI_PERMISSIONS.CAMPAIGN_TASKS_ACTIVATE)
+  occurrenceRetry(@Param("occurrenceId") occurrenceId: string, @Headers() headers: RequestHeaders) {
+    return this.recurring.retry(occurrenceId, this.tenant(headers));
+  }
 }
 
 @Controller("api/ai/distribution")
-@UseGuards(AdminAuthGuard)
+@UseGuards(CampaignTaskParticipantAuthGuard)
 export class CampaignTaskParticipantController {
   constructor(
     @Inject(CampaignTaskService) private readonly service: CampaignTaskService,
     @Inject(DistributionService) private readonly distribution: DistributionService,
   ) {}
-  private context(headers: RequestHeaders) {
-    return {
-      tenantId: required(headers["x-tenant-id"], "TENANT_ID_REQUIRED"),
-      participantId: required(headers["x-participant-id"], "PARTICIPANT_ID_REQUIRED"),
-    };
+  private ctx(request: CampaignTaskParticipantRequest) {
+    if (!request.participantContext) throw new BadRequestException("PARTICIPANT_CONTEXT_REQUIRED");
+    return request.participantContext;
   }
   @Get("tasks/available")
-  available(@Headers() headers: RequestHeaders) {
-    const value = this.context(headers);
+  available(@Req() request: CampaignTaskParticipantRequest) {
+    const value = this.ctx(request);
     return this.service.available(value.tenantId, value.participantId);
   }
   @Get("tasks/:taskId")
-  task(@Param("taskId") taskId: string, @Headers() headers: RequestHeaders) {
-    const value = this.context(headers);
+  task(@Param("taskId") taskId: string, @Req() request: CampaignTaskParticipantRequest) {
+    const value = this.ctx(request);
     return this.service.participantTask(taskId, value.tenantId, value.participantId);
   }
   @Post("tasks/:taskId/claim")
-  claim(@Param("taskId") taskId: string, @Headers() headers: RequestHeaders) {
-    const value = this.context(headers);
-    return this.service.claim(taskId, value.tenantId, value.participantId, required(headers["idempotency-key"], "IDEMPOTENCY_KEY_REQUIRED"));
+  claim(@Param("taskId") taskId: string, @Body() body: Record<string, unknown>, @Req() request: CampaignTaskParticipantRequest, @Headers() headers: RequestHeaders) {
+    const value = this.ctx(request);
+    const claimOptions: { occurrenceId?: string } = {};
+    if (typeof body.occurrenceId === "string") claimOptions.occurrenceId = body.occurrenceId;
+    return this.service.claim(taskId, value.tenantId, value.participantId, required(headers["idempotency-key"], "IDEMPOTENCY_KEY_REQUIRED"), claimOptions);
   }
   @Get("assignments/:id")
-  assignment(@Param("id") id: string, @Headers() headers: RequestHeaders) {
-    return this.distribution.assignmentPackage(id, this.context(headers).participantId);
+  assignment(@Param("id") id: string, @Req() request: CampaignTaskParticipantRequest) {
+    return this.distribution.assignmentPackage(id, this.ctx(request).participantId);
   }
   @Post("assignments/:id/cancel")
-  cancel(@Param("id") id: string, @Headers() headers: RequestHeaders) {
-    return this.distribution.cancelAssignment(id, this.context(headers).participantId);
+  cancel(@Param("id") id: string, @Req() request: CampaignTaskParticipantRequest) {
+    return this.distribution.cancelAssignment(id, this.ctx(request).participantId);
   }
   @Post("assignments/:id/assets/refresh")
-  refresh(@Param("id") id: string, @Headers() headers: RequestHeaders) {
-    return this.distribution.assignmentPackage(id, this.context(headers).participantId);
+  refresh(@Param("id") id: string, @Req() request: CampaignTaskParticipantRequest) {
+    return this.distribution.assignmentPackage(id, this.ctx(request).participantId);
   }
   @Post("invitations/:token/accept")
-  accept(@Param("token") token: string, @Headers() headers: RequestHeaders) {
-    const value = this.context(headers);
+  accept(@Param("token") token: string, @Req() request: CampaignTaskParticipantRequest) {
+    const value = this.ctx(request);
     return this.service.acceptInvitation(token, value.participantId, value.tenantId, true);
   }
   @Post("invitations/:token/decline")
-  decline(@Param("token") token: string, @Headers() headers: RequestHeaders) {
-    const value = this.context(headers);
+  decline(@Param("token") token: string, @Req() request: CampaignTaskParticipantRequest) {
+    const value = this.ctx(request);
     return this.service.acceptInvitation(token, value.participantId, value.tenantId, false);
   }
   @Post("proofs/upload-session")
-  proofUpload(@Body() body: Record<string, unknown>, @Headers() headers: RequestHeaders) {
-    const value = this.context(headers);
-    return this.distribution.createProofUploadSession({ ...body, externalUserId: value.participantId }, value.participantId, required(headers["idempotency-key"], "IDEMPOTENCY_KEY_REQUIRED"));
+  proofUpload(@Body() body: Record<string, unknown>, @Req() request: CampaignTaskParticipantRequest, @Headers() headers: RequestHeaders) {
+    const value = this.ctx(request);
+    return this.distribution.createProofUploadSession({ ...body, tenantId: value.tenantId, externalUserId: value.participantId }, value.participantId, required(headers["idempotency-key"], "IDEMPOTENCY_KEY_REQUIRED"));
   }
   @Post("proofs/:id/complete")
-  proofComplete(@Param("id") id: string, @Headers() headers: RequestHeaders) {
-    return this.distribution.completeProof(id, this.context(headers).participantId);
+  proofComplete(@Param("id") id: string, @Req() request: CampaignTaskParticipantRequest) {
+    const value = this.ctx(request);
+    return this.distribution.completeProof(id, value.participantId, value.tenantId);
   }
   @Get("proofs/:id/status")
-  proofStatus(@Param("id") id: string, @Headers() headers: RequestHeaders) {
-    return this.distribution.getProofForExternalUser(id, this.context(headers).participantId);
+  proofStatus(@Param("id") id: string, @Req() request: CampaignTaskParticipantRequest) {
+    const value = this.ctx(request);
+    return this.distribution.getProofForExternalUser(id, value.participantId, value.tenantId);
   }
   @Post("proofs/:id/additional-evidence")
-  additionalEvidence(@Param("id") id: string, @Body() body: Record<string, unknown>, @Headers() headers: RequestHeaders) {
-    const value = this.context(headers);
-    return this.distribution.addEvidence(id, body, value.participantId);
+  additionalEvidence(@Param("id") id: string, @Body() body: Record<string, unknown>, @Req() request: CampaignTaskParticipantRequest) {
+    const value = this.ctx(request);
+    return this.distribution.addEvidence(id, { ...body, tenantId: value.tenantId }, value.participantId);
   }
 }

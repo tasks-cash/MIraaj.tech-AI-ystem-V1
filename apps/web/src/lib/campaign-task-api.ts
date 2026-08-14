@@ -1,4 +1,5 @@
 import "server-only";
+import { createParticipantContextToken } from "@miraaj/shared-config";
 
 const apiBase = () => (process.env.MIRAAJ_API_INTERNAL_URL ?? "http://127.0.0.1:4200").replace(/\/$/, "");
 
@@ -13,13 +14,17 @@ export async function campaignTaskApi<T>(
     body?: unknown;
   },
 ): Promise<T> {
-  const token = process.env.ADMIN_API_TOKEN;
-  if (!token) throw new Error("Campaign operations authentication is not configured.");
+  const participantSecret = process.env.CAMPAIGN_TASK_PARTICIPANT_API_TOKEN;
+  const adminToken = process.env.ADMIN_API_TOKEN;
+  if (!participantSecret) throw new Error("Campaign operations authentication is not configured.");
+  const authorization = options.participantId
+    ? `Bearer ${createParticipantContextToken({ tenantId: options.tenantId, participantId: options.participantId }, participantSecret, 60)}`
+    : `Bearer ${adminToken}`;
   const response = await fetch(`${apiBase()}${path}`, {
     method: options.method ?? "GET",
     cache: "no-store",
     headers: {
-      authorization: `Bearer ${token}`,
+      authorization,
       "content-type": "application/json",
       "x-tenant-id": options.tenantId,
       ...(options.participantId ? { "x-participant-id": options.participantId } : {}),
@@ -48,6 +53,11 @@ export interface CampaignTaskView {
   currentRevision: number;
   startAt?: string;
   endAt?: string;
+  recurrenceConfiguration?: {
+    enabled: boolean; cadence?: "daily" | "weekly"; interval?: number; weekdays?: number[];
+    localTime?: string; timezone?: string; startDate?: string; endDate?: string;
+    maxOccurrences?: number; allowParticipantRepeat?: boolean; allowOverlap?: boolean;
+  };
 }
 
 export interface AssignmentPackageView {

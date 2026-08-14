@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
 const appEnvironmentSchema = z.enum(["development", "test", "staging", "production"]);
@@ -182,6 +183,8 @@ export const apiEnvironmentSchema = serverEnvironmentSchema
     TEMPORARY_ADMIN_TOKEN_ENABLED: environmentBoolean.default(true),
     ALLOW_TEMPORARY_ADMIN_TOKEN_IN_PRODUCTION: environmentBoolean.default(false),
     ADMIN_API_TOKEN: nonEmptySecret,
+    CAMPAIGN_TASK_PARTICIPANT_API_TOKEN: nonEmptySecret,
+    MIRAAJ_WEB_ORIGINS: z.string().default(""),
     MEDIA_MAX_IMAGE_BYTES: positiveInt(1_024, 52_428_800).default(15_728_640),
     MEDIA_MAX_PDF_BYTES: positiveInt(1_024, 104_857_600).default(26_214_400),
     MEDIA_MAX_IMAGE_WIDTH: positiveInt(64, 20_000).default(12_000),
@@ -392,10 +395,25 @@ export const apiEnvironmentSchema = serverEnvironmentSchema
     CAMPAIGN_TASK_OPERATIONS_ENABLED: environmentBoolean.default(true),
     CAMPAIGN_TASK_ADMIN_UI_ENABLED: environmentBoolean.default(true),
     CAMPAIGN_TASK_PARTICIPANT_PORTAL_ENABLED: environmentBoolean.default(false),
+    CAMPAIGN_TASK_BROWSER_PROOF_UPLOAD_ENABLED: environmentBoolean.default(false),
     CAMPAIGN_TASK_GENERAL_DISCOVERY_ENABLED: environmentBoolean.default(false),
     CAMPAIGN_TASK_INVITATIONS_ENABLED: environmentBoolean.default(false),
     CAMPAIGN_TASK_MANUAL_ASSIGNMENTS_ENABLED: environmentBoolean.default(false),
     CAMPAIGN_TASK_RECURRING_ENABLED: environmentBoolean.default(false),
+    CAMPAIGN_TASK_RECURRING_SCHEDULER_ENABLED: environmentBoolean.default(false),
+    CAMPAIGN_TASK_RECURRING_QUEUE_NAME: z.string().min(1).default("miraaj.ai.campaign-task-recurring"),
+    CAMPAIGN_TASK_RECURRING_DLQ_NAME: z.string().min(1).default("miraaj.ai.campaign-task-recurring.dead-letter"),
+    NOTIFICATION_IN_APP_ENABLED: environmentBoolean.default(true),
+    NOTIFICATION_EMAIL_ENABLED: environmentBoolean.default(false),
+    NOTIFICATION_EXTERNAL_WEBHOOK_ENABLED: environmentBoolean.default(false),
+    NOTIFICATION_DIGEST_ENABLED: environmentBoolean.default(false),
+    NOTIFICATION_QUEUE_NAME: z.string().min(1).default("miraaj.ai.notifications"),
+    NOTIFICATION_DLQ_NAME: z.string().min(1).default("miraaj.ai.notifications.dead-letter"),
+    NOTIFICATION_EMAIL_ADAPTER: z.enum(["none", "fake"]).default("none"),
+    NOTIFICATION_WEBHOOK_ALLOWLIST: z.string().default(""),
+    NOTIFICATION_WEBHOOK_URL: optionalHttpUrl.default(""),
+    NOTIFICATION_WEBHOOK_SECRET: z.string().default(""),
+    NOTIFICATION_RETENTION_DAYS: positiveInt(1, 365).default(90),
     DISTRIBUTION_CAMPAIGN_OPERATIONS_ENABLED: environmentBoolean.default(true),
     DISTRIBUTION_ASSIGNMENT_CREATION_ENABLED: environmentBoolean.default(true),
     DISTRIBUTION_PROOF_PROCESSING_ENABLED: environmentBoolean.default(true),
@@ -493,6 +511,15 @@ export const apiEnvironmentSchema = serverEnvironmentSchema
         message: "enabled Tasks.cash integration requires a callback URL and 32-character HMAC secret",
       });
     }
+    if (environment.CAMPAIGN_TASK_RECURRING_SCHEDULER_ENABLED && !environment.CAMPAIGN_TASK_RECURRING_ENABLED) {
+      context.addIssue({ code: "custom", path: ["CAMPAIGN_TASK_RECURRING_SCHEDULER_ENABLED"], message: "recurring scheduler requires recurring tasks to be enabled" });
+    }
+    if (environment.NOTIFICATION_EMAIL_ENABLED && environment.NOTIFICATION_EMAIL_ADAPTER === "none") {
+      context.addIssue({ code: "custom", path: ["NOTIFICATION_EMAIL_ADAPTER"], message: "enabled email notifications require a configured adapter" });
+    }
+    if (environment.NOTIFICATION_EXTERNAL_WEBHOOK_ENABLED && (!environment.NOTIFICATION_WEBHOOK_URL || !environment.NOTIFICATION_WEBHOOK_ALLOWLIST || environment.NOTIFICATION_WEBHOOK_SECRET.length < 32)) {
+      context.addIssue({ code: "custom", path: ["NOTIFICATION_EXTERNAL_WEBHOOK_ENABLED"], message: "enabled notification webhook requires URL, allowlist, and 32-character secret" });
+    }
   });
 
 export type ServerEnvironment = z.infer<typeof serverEnvironmentSchema>;
@@ -510,4 +537,86 @@ export function parseEnvironment<TSchema extends z.ZodType>(
     throw new Error(`Invalid environment configuration: ${details}`);
   }
   return parsed.data;
+}
+
+// Participant portal context tokens
+// These are short-lived signed JWTs that bind a participant identity to a tenant.
+// The browser receives only the signed token; the internal API secret never leaves the server.
+
+export interface ParticipantContext {
+  tenantId: string;
+  participantId: string;
+}
+
+function base64UrlEncode(input: Buffer | string): string {
+  return Buffer.from(input).toString("base64url");
+}
+
+function base64UrlDecode(input: string): Buffer {
+  return Buffer.from(input, "base64url");
+}
+
+function signJwt(headerBase64Url: string, payloadBase64Url: string, secret: string): string {
+  const data = `${headerBase64Url}.${payloadBase64Url}`;
+  const signature = createHmac("sha256", secret).update(data).digest();
+  return base64UrlEncode(signature);
+}
+
+export function createParticipantContextToken(
+  context: ParticipantContext,
+  secret: string,
+  expiresInSeconds = 86_400,
+): string {
+  if (!secret || secret.length < 32) {
+    throw new Error("Participant context secret must be at least 32 characters");
+  }
+  const nowSeconds = Math.floor(Date.now() / 1_000);
+  const header = { alg: "HS256", typ: "JWT" };
+  const payload = {
+    sub: context.participantId,
+    tid: context.tenantId,
+    iat: nowSeconds,
+    exp: nowSeconds + expiresInSeconds,
+  };
+  const headerBase64Url = base64UrlEncode(JSON.stringify(header));
+  const payloadBase64Url = base64UrlEncode(JSON.stringify(payload));
+  const signature = signJwt(headerBase64Url, payloadBase64Url, secret);
+  return `${headerBase64Url}.${payloadBase64Url}.${signature}`;
+}
+
+export function verifyParticipantContextToken(
+  token: string,
+  secret: string,
+): ParticipantContext {
+  if (!secret || secret.length < 32) {
+    throw new Error("Participant context secret must be at least 32 characters");
+  }
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    throw new Error("INVALID_PARTICIPANT_CONTEXT_TOKEN");
+  }
+  const [headerBase64Url, payloadBase64Url, signatureBase64Url] = parts as [string, string, string];
+  const expectedSignature = signJwt(headerBase64Url, payloadBase64Url, secret);
+  const providedSignature = base64UrlDecode(signatureBase64Url);
+  const expectedSignatureBuffer = Buffer.from(expectedSignature, "base64url");
+  if (providedSignature.length !== expectedSignatureBuffer.length || !timingSafeEqual(providedSignature, expectedSignatureBuffer)) {
+    throw new Error("INVALID_PARTICIPANT_CONTEXT_TOKEN");
+  }
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(base64UrlDecode(payloadBase64Url).toString("utf8"));
+  } catch {
+    throw new Error("INVALID_PARTICIPANT_CONTEXT_TOKEN");
+  }
+  const nowSeconds = Math.floor(Date.now() / 1_000);
+  if (typeof payload.exp !== "number" || payload.exp < nowSeconds) {
+    throw new Error("PARTICIPANT_CONTEXT_TOKEN_EXPIRED");
+  }
+  if (typeof payload.sub !== "string" || typeof payload.tid !== "string") {
+    throw new Error("INVALID_PARTICIPANT_CONTEXT_TOKEN");
+  }
+  if (!payload.sub.trim() || !payload.tid.trim()) {
+    throw new Error("INVALID_PARTICIPANT_CONTEXT_TOKEN");
+  }
+  return { tenantId: payload.tid.trim(), participantId: payload.sub.trim() };
 }

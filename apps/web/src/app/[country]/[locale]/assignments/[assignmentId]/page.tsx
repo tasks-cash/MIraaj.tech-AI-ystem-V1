@@ -1,6 +1,9 @@
 import Image from "next/image";
+import { createParticipantContextToken } from "@miraaj/shared-config";
 import { requireCampaignTaskOperator } from "@/lib/campaign-task-auth";
 import { campaignTaskApi, type AssignmentPackageView } from "@/lib/campaign-task-api";
+import { ProofUpload } from "./proof-upload";
+import { NotificationCenter } from "./notification-center";
 
 export default async function AssignmentPortal({
   params,
@@ -13,6 +16,10 @@ export default async function AssignmentPortal({
   const { locale, assignmentId } = await params;
   const { tenant = "internal-pilot", participant = "" } = await searchParams;
   const assignment = await campaignTaskApi<AssignmentPackageView>(`/api/ai/distribution/assignments/${assignmentId}`, { tenantId: tenant, participantId: participant });
+  const secret = process.env.CAMPAIGN_TASK_PARTICIPANT_API_TOKEN;
+  const contextToken = secret
+    ? createParticipantContextToken({ tenantId: tenant, participantId: participant }, secret, 86_400)
+    : "";
   return (
     <section className="min-h-screen bg-slate-50 px-5 py-16">
       <div className="mx-auto max-w-6xl">
@@ -25,9 +32,10 @@ export default async function AssignmentPortal({
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 className="text-xl font-black">Tracked destination</h2><a className="mt-4 block break-all font-bold text-blue-700 underline" href={assignment.uniqueTrackedLink} rel="noreferrer" target="_blank">{assignment.uniqueTrackedLink}</a></div>
           </article>
           <aside className="space-y-6">
+            <NotificationCenter contextToken={contextToken} locale={locale} />
             <a href={assignment.qrDownloadUrl} className="block rounded-2xl border border-slate-200 bg-white p-5 text-center shadow-sm"><Image unoptimized width={768} height={768} alt="Unique assignment QR code" src={assignment.qrDownloadUrl} className="mx-auto aspect-square w-full max-w-72 object-contain" /><span className="mt-3 block font-bold text-blue-700">Download QR</span></a>
             <a href={assignment.headerDownloadUrl} className="block rounded-2xl border border-slate-200 bg-white p-5 text-center shadow-sm"><Image unoptimized width={1200} height={630} alt="Approved branded campaign header" src={assignment.headerDownloadUrl} className="h-auto w-full rounded-lg object-contain" /><span className="mt-3 block font-bold text-blue-700">Download header</span></a>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="font-black">Evidence</h2><p className="mt-2 text-sm leading-6 text-slate-600">Use the protected proof upload endpoint. Screenshots remain in private Miraaj storage and download links expire.</p><pre className="mt-3 overflow-auto rounded-lg bg-slate-100 p-3 text-xs">{JSON.stringify(assignment.screenshotRequirements, null, 2)}</pre></div>
+            <ProofUpload assignmentId={assignment.externalAssignmentId} contextToken={contextToken} locale={locale} proofDeadline={assignment.proofDeadline} />
           </aside>
         </div>
       </div>
