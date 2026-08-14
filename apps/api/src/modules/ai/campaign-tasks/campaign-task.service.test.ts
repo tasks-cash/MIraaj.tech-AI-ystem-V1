@@ -12,6 +12,7 @@ import {
   CampaignTaskInvitationModel,
   CampaignTaskEventModel,
 } from "../models/campaign-task.schema.js";
+import { DistributionAssignmentModel } from "../models/distribution.schema.js";
 
 const baseEnv = {
   NODE_ENV: "test", APP_ENV: "test", LOG_LEVEL: "error",
@@ -69,6 +70,7 @@ describe("CampaignTaskService claim occurrence binding", () => {
     vi.spyOn(CampaignTaskOccurrenceModel, "findOneAndUpdate").mockResolvedValue(occurrence);
     vi.spyOn(CampaignTaskReservationModel, "create").mockResolvedValue({} as any);
     vi.spyOn(CampaignTaskReservationModel, "updateOne").mockResolvedValue({} as any);
+    vi.spyOn(DistributionAssignmentModel, "exists").mockResolvedValue(null);
     await service.claim("task-1", "t1", "p1", "idem-1", { occurrenceId: "occ-1" });
     expect(createAssignment).toHaveBeenCalledWith(expect.objectContaining({ occurrenceId: "occ-1" }), expect.any(String), expect.any(String));
   });
@@ -83,6 +85,38 @@ describe("CampaignTaskService claim occurrence binding", () => {
     vi.spyOn(CampaignTaskInvitationModel, "findOne").mockReturnValue({ lean: () => Promise.resolve(null) } as any);
     vi.spyOn(CampaignTaskReservationModel, "findOne").mockReturnValue({ lean: () => Promise.resolve(null) } as any);
     vi.spyOn(CampaignTaskOccurrenceModel, "findOneAndUpdate").mockResolvedValue(null);
+    await expect(service.claim("task-1", "t1", "p1", "idem-1", { occurrenceId: "occ-1" })).rejects.toThrow(ConflictException);
+  });
+
+  it("rejects claim when occurrence revision is stale", async () => {
+    const service = new CampaignTaskService({ createAssignment: vi.fn() } as any, {} as any, { create: vi.fn() } as any);
+    vi.spyOn(CampaignTaskModel, "findOne").mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ ...makeTask("recurring"), currentRevision: 2 }) }) } as any);
+    vi.spyOn(DistributionParticipantModel, "findOne").mockReturnValue({ lean: () => Promise.resolve({ publicId: "p1", tenantId: "t1", country: "DZ", preferredLanguage: "ar", status: "active", locale: "ar-DZ" }) } as any);
+    vi.spyOn(CampaignTaskInvitationModel, "findOne").mockReturnValue({ lean: () => Promise.resolve(null) } as any);
+    vi.spyOn(CampaignTaskParticipantCapacityModel, "updateOne").mockResolvedValue({} as any);
+    vi.spyOn(CampaignTaskParticipantCapacityModel, "findOneAndUpdate").mockResolvedValue({ publicId: "cap-1", activeCount: 1, dailyCount: 1 });
+    vi.spyOn(CampaignTaskReservationModel, "findOne").mockReturnValue({ lean: () => Promise.resolve(null) } as any);
+    const occurrence = { publicId: "occ-1", tenantId: "t1", campaignTaskId: "task-1", status: "active", taskRevision: 1, capacitySnapshot: 5, activeAssignmentCount: 1, countryCapacityUsed: {}, assignmentWindowStart: new Date(Date.now() - 86_400_000), assignmentWindowEnd: new Date(Date.now() + 86_400_000) };
+    vi.spyOn(CampaignTaskOccurrenceModel, "findOneAndUpdate").mockResolvedValue(occurrence);
+    vi.spyOn(CampaignTaskReservationModel, "create").mockResolvedValue({} as any);
+    vi.spyOn(CampaignTaskReservationModel, "updateOne").mockResolvedValue({} as any);
+    vi.spyOn(DistributionAssignmentModel, "exists").mockResolvedValue(null);
+    await expect(service.claim("task-1", "t1", "p1", "idem-1", { occurrenceId: "occ-1" })).rejects.toThrow(ConflictException);
+  });
+
+  it("rejects duplicate active assignment in the same occurrence", async () => {
+    const service = new CampaignTaskService({ createAssignment: vi.fn() } as any, {} as any, { create: vi.fn() } as any);
+    vi.spyOn(CampaignTaskModel, "findOne").mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ ...makeTask("recurring"), currentRevision: 1 }) }) } as any);
+    vi.spyOn(DistributionParticipantModel, "findOne").mockReturnValue({ lean: () => Promise.resolve({ publicId: "p1", tenantId: "t1", country: "DZ", preferredLanguage: "ar", status: "active", locale: "ar-DZ" }) } as any);
+    vi.spyOn(CampaignTaskInvitationModel, "findOne").mockReturnValue({ lean: () => Promise.resolve(null) } as any);
+    vi.spyOn(CampaignTaskParticipantCapacityModel, "updateOne").mockResolvedValue({} as any);
+    vi.spyOn(CampaignTaskParticipantCapacityModel, "findOneAndUpdate").mockResolvedValue({ publicId: "cap-1", activeCount: 1, dailyCount: 1 });
+    vi.spyOn(CampaignTaskReservationModel, "findOne").mockReturnValue({ lean: () => Promise.resolve(null) } as any);
+    const occurrence = { publicId: "occ-1", tenantId: "t1", campaignTaskId: "task-1", status: "active", taskRevision: 1, capacitySnapshot: 5, activeAssignmentCount: 1, countryCapacityUsed: {}, assignmentWindowStart: new Date(Date.now() - 86_400_000), assignmentWindowEnd: new Date(Date.now() + 86_400_000) };
+    vi.spyOn(CampaignTaskOccurrenceModel, "findOneAndUpdate").mockResolvedValue(occurrence);
+    vi.spyOn(CampaignTaskReservationModel, "create").mockResolvedValue({} as any);
+    vi.spyOn(CampaignTaskReservationModel, "updateOne").mockResolvedValue({} as any);
+    vi.spyOn(DistributionAssignmentModel, "exists").mockResolvedValueOnce({ _id: "existing" } as any);
     await expect(service.claim("task-1", "t1", "p1", "idem-1", { occurrenceId: "occ-1" })).rejects.toThrow(ConflictException);
   });
 });

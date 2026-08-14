@@ -9,6 +9,15 @@ export interface RecurrenceConfiguration {
   startDate?: string;
   endDate?: string;
   maxOccurrences?: number;
+  allowRepeat?: boolean;
+}
+
+function validateTimezone(timezone: string): void {
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: timezone });
+  } catch {
+    throw new Error(`INVALID_TIMEZONE: ${timezone}`);
+  }
 }
 
 const localParts = (date: Date, timezone: string) => {
@@ -20,8 +29,12 @@ const localParts = (date: Date, timezone: string) => {
 };
 
 export function zonedDate(localDate: string, localTime: string, timezone: string): Date {
+  validateTimezone(timezone);
   const [year = 0, month = 0, day = 0] = localDate.split("-").map(Number);
   const [hour = 0, minute = 0] = localTime.split(":").map(Number);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day) || !Number.isInteger(hour) || !Number.isInteger(minute)) {
+    throw new Error("INVALID_LOCAL_DATE_TIME");
+  }
   let candidate = Date.UTC(year, month - 1, day, hour, minute);
   for (let index = 0; index < 3; index += 1) {
     const parts = localParts(new Date(candidate), timezone);
@@ -34,7 +47,7 @@ export function zonedDate(localDate: string, localTime: string, timezone: string
 const dateKey = (date: Date) => date.toISOString().slice(0, 10);
 
 export function nextOccurrences(configuration: RecurrenceConfiguration, from: Date, limit = 10): Date[] {
-  new Intl.DateTimeFormat("en", { timeZone: configuration.timezone });
+  validateTimezone(configuration.timezone);
   const start = configuration.startDate ? new Date(`${configuration.startDate}T00:00:00Z`) : new Date(from);
   const end = configuration.endDate ? new Date(`${configuration.endDate}T23:59:59.999Z`) : undefined;
   const anchor = new Date(start);
@@ -57,5 +70,5 @@ export function nextOccurrences(configuration: RecurrenceConfiguration, from: Da
   return result;
 }
 
-export const recurrenceKey = (taskId: string, scheduledFor: Date) =>
-  createHash("sha256").update(`${taskId}:${scheduledFor.toISOString()}`).digest("hex").slice(0, 32);
+export const recurrenceKey = (taskId: string, scheduledFor: Date, timezone?: string) =>
+  createHash("sha256").update(`${taskId}:${timezone ?? "UTC"}:${scheduledFor.toISOString()}`).digest("hex").slice(0, 32);

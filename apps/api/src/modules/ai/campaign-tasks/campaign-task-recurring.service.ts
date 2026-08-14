@@ -3,6 +3,7 @@ import { ConflictException, Injectable, NotFoundException } from "@nestjs/common
 import { randomUUID } from "node:crypto";
 import { loadEnvironment } from "../../../environment.js";
 import { CampaignTaskModel, CampaignTaskOccurrenceModel } from "../models/campaign-task.schema.js";
+import { DistributionAssignmentModel, ProofSubmissionModel } from "../models/distribution.schema.js";
 import { CampaignTaskRecurringQueueService } from "../queue/campaign-task-recurring-queue.service.js";
 import { nextOccurrences, recurrenceKey, type RecurrenceConfiguration } from "./campaign-task-recurrence.js";
 
@@ -22,7 +23,7 @@ export class CampaignTaskRecurringService {
     const config = task.recurrenceConfiguration as RecurrenceConfiguration & { enabled?: boolean };
     if (!config.enabled) throw new ConflictException("CAMPAIGN_TASK_RECURRENCE_NOT_CONFIGURED");
     return nextOccurrences(config, new Date(), Math.min(25, Math.max(1, count))).map((scheduledFor) => ({
-      recurrenceKey: recurrenceKey(taskId, scheduledFor), scheduledFor: scheduledFor.toISOString(), timezone: config.timezone,
+      recurrenceKey: recurrenceKey(taskId, scheduledFor, config.timezone), scheduledFor: scheduledFor.toISOString(), timezone: config.timezone,
     }));
   }
 
@@ -39,7 +40,7 @@ export class CampaignTaskRecurringService {
     const candidates = nextOccurrences(config, new Date(), Math.min(25, remaining));
     const created = [];
     for (const scheduledFor of candidates) {
-      const key = recurrenceKey(taskId, scheduledFor);
+      const key = recurrenceKey(taskId, scheduledFor, config.timezone);
       const assignmentWindowEnd = new Date(scheduledFor.getTime() + task.assignmentDurationMinutes * 60_000);
       const proofDeadline = new Date(scheduledFor.getTime() + task.proofDeadlineMinutes * 60_000);
       try {
@@ -84,10 +85,15 @@ export class CampaignTaskRecurringService {
 
   async activate(occurrenceId: string) {
     const occurrence = await CampaignTaskOccurrenceModel.findOne({ publicId: occurrenceId });
-    if (!occurrence || occurrence.status !== "scheduled") return occurrence;
+    if (!occurrence || !["scheduled", "activating"].includes(occurrence.status)) return occurrence;
+    occurrence.status = "activating"; occurrence.updatedBy = "recurring-scheduler";
+    await occurrence.save();
     const parent = await CampaignTaskModel.findOne({ publicId: occurrence.campaignTaskId, tenantId: occurrence.tenantId }).lean();
     if (!parent || !["approved", "scheduled", "active"].includes(parent.status) || parent.emergencyStop) {
       occurrence.status = "skipped"; occurrence.lastSafeErrorCode = "PARENT_INACTIVE"; await occurrence.save(); return occurrence;
+    }
+    if (occurrence.taskRevision !== parent.currentRevision) {
+      occurrence.status = "failed"; occurrence.lastSafeErrorCode = "STALE_REVISION"; await occurrence.save(); return occurrence;
     }
     const configuration = parent.recurrenceConfiguration as { allowOverlap?: boolean };
     if (!configuration.allowOverlap) {
@@ -101,11 +107,26 @@ export class CampaignTaskRecurringService {
   }
 
   async complete(occurrenceId: string) {
-    const occurrence = await CampaignTaskOccurrenceModel.findOne({ publicId: occurrenceId, status: "active" });
+    const occurrence = await CampaignTaskOccurrenceModel.findOne({ publicId: occurrenceId, status: { $in: ["active", "closing"] } });
     if (!occurrence) return null;
     const parent = await CampaignTaskModel.findOne({ publicId: occurrence.campaignTaskId, tenantId: occurrence.tenantId }).lean();
     if (parent?.emergencyStop) {
       occurrence.lastSafeErrorCode = "PARENT_STOPPED";
+    }
+    const now = new Date();
+    const proofDeadline = new Date(occurrence.proofDeadline);
+    const activeStatuses = ["active", "awaiting_proof", "verification_pending", "needs_review", "more_evidence_required", "queued", "submitted"];
+    const [activeAssignments, pendingProofs] = await Promise.all([
+      DistributionAssignmentModel.countDocuments({ occurrenceId: occurrence.publicId, status: { $in: activeStatuses } }),
+      ProofSubmissionModel.countDocuments({ occurrenceId: occurrence.publicId, status: { $in: ["upload_pending", "queued", "verifying", "needs_review", "more_evidence_required"] } }),
+    ]);
+    const hasActiveWork = activeAssignments > 0 || pendingProofs > 0;
+    if (hasActiveWork && now < proofDeadline) {
+      occurrence.status = "closing";
+      occurrence.updatedBy = "recurring-scheduler";
+      await occurrence.save();
+      await this.queue.enqueueCompletion(occurrence.publicId, proofDeadline);
+      return occurrence;
     }
     occurrence.status = "completed"; occurrence.completedAt = new Date(); occurrence.updatedBy = "recurring-scheduler";
     await occurrence.save();
@@ -122,23 +143,50 @@ export class CampaignTaskRecurringService {
   async recover(tenantId?: string, limit = 25) {
     this.enabled();
     const now = new Date();
-    const filter: Record<string, unknown> = { status: { $in: ["scheduled", "activating", "active", "failed"] } };
+    const filter: Record<string, unknown> = { status: { $in: ["scheduled", "activating", "active", "failed", "closing"] } };
     if (tenantId) filter.tenantId = tenantId;
     const occurrences = await CampaignTaskOccurrenceModel.find(filter).sort({ scheduledFor: 1 }).limit(limit).lean();
-    const recovered = [];
+    const recovered: Array<{ publicId: string; action: string }> = [];
     for (const occurrence of occurrences) {
       const parent = await CampaignTaskModel.findOne({ publicId: occurrence.campaignTaskId, tenantId: occurrence.tenantId }).lean();
       if (!parent) continue;
-      if (parent.status === "paused" || parent.status === "cancelled" || parent.emergencyStop) continue;
+      if (["paused", "cancelled"].includes(parent.status) || parent.emergencyStop) continue;
       if (occurrence.status === "scheduled" && new Date(occurrence.scheduledFor) <= now) {
         await this.queue.enqueueActivation(occurrence.publicId, new Date());
         recovered.push({ publicId: occurrence.publicId, action: "enqueue_activate" });
-      } else if (occurrence.status === "active" && new Date(occurrence.assignmentWindowEnd) <= now) {
+      } else if (occurrence.status === "activating" && new Date(occurrence.updatedAt).getTime() < now.getTime() - 60_000) {
+        await this.queue.enqueueActivation(occurrence.publicId, new Date());
+        recovered.push({ publicId: occurrence.publicId, action: "enqueue_activate" });
+      } else if ((occurrence.status === "active" || occurrence.status === "closing") && new Date(occurrence.assignmentWindowEnd) <= now) {
         await this.queue.enqueueCompletion(occurrence.publicId, new Date());
         recovered.push({ publicId: occurrence.publicId, action: "enqueue_complete" });
       } else if (occurrence.status === "failed") {
         await this.queue.enqueueActivation(occurrence.publicId, new Date());
         recovered.push({ publicId: occurrence.publicId, action: "enqueue_retry" });
+      }
+    }
+    return { recovered: recovered.length, items: recovered };
+  }
+
+  async recoverDeadLetter(limit = 25) {
+    this.enabled();
+    const jobs = await this.queue.deadLetter.getJobs(["failed"], 0, limit - 1);
+    const recovered: Array<{ jobId: string; action: string }> = [];
+    for (const job of jobs) {
+      const data = job.data as { occurrenceId?: string };
+      if (!data.occurrenceId) continue;
+      const occurrence = await CampaignTaskOccurrenceModel.findOne({ publicId: data.occurrenceId }).lean();
+      if (!occurrence) continue;
+      if (occurrence.status === "completed" || occurrence.status === "skipped" || occurrence.status === "cancelled") {
+        recovered.push({ jobId: String(job.id), action: "skip_terminal" });
+        continue;
+      }
+      if (occurrence.status === "failed" || occurrence.status === "scheduled" || occurrence.status === "activating") {
+        await this.queue.enqueueActivation(occurrence.publicId, new Date());
+        recovered.push({ jobId: String(job.id), action: "enqueue_activate" });
+      } else {
+        await this.queue.enqueueCompletion(occurrence.publicId, new Date());
+        recovered.push({ jobId: String(job.id), action: "enqueue_complete" });
       }
     }
     return { recovered: recovered.length, items: recovered };

@@ -10,6 +10,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { loadEnvironment } from "../../../environment.js";
 import { AiInternalClientService } from "../ai-internal-client.service.js";
 import { CampaignPackageModel } from "../models/campaign.schema.js";
+import { CampaignTaskModel, CampaignTaskOccurrenceModel } from "../models/campaign-task.schema.js";
 import {
   DistributionAssignmentModel,
   DistributionCopyVariantModel,
@@ -52,6 +53,16 @@ export class DistributionService {
     @Inject(MediaStorageService) private readonly storage: MediaStorageService,
     @Inject(DistributionQueueService) private readonly queues: DistributionQueueService,
   ) {}
+
+  private assertOccurrenceBinding(assignment: { occurrenceId?: string | null }, inputOccurrenceId?: string) {
+    const bound = assignment.occurrenceId ? String(assignment.occurrenceId) : undefined;
+    const supplied = inputOccurrenceId ? String(inputOccurrenceId) : undefined;
+    if (bound) {
+      if (supplied && supplied !== bound) throw new BadRequestException("PROOF_OCCURRENCE_MISMATCH");
+      return;
+    }
+    if (supplied) throw new BadRequestException("PROOF_OCCURRENCE_NOT_APPLICABLE");
+  }
 
   async createTemplate(input: Record<string, unknown>, actor: string, correlationId = randomUUID()) {
     const campaignPackageId = String(input.campaignPackageId ?? "");
@@ -169,6 +180,12 @@ export class DistributionService {
     if (existing) return this.assignmentPackage(existing.assignmentId);
     const template = await DistributionTaskTemplateModel.findOne({ templateId: String(input.templateId), status: { $in: ["approved", "active"] } }).lean();
     if (!template) throw new BadRequestException("APPROVED_DISTRIBUTION_TEMPLATE_REQUIRED");
+    if (input.occurrenceId) {
+      const task = await CampaignTaskModel.findOne({ publicId: String(input.externalTaskId), tenantId: String(input.tenantId ?? ""), taskMode: "recurring" }).lean();
+      if (!task) throw new BadRequestException("OCCURRENCE_ID_NOT_APPLICABLE");
+      const occurrence = await CampaignTaskOccurrenceModel.findOne({ publicId: String(input.occurrenceId), tenantId: String(input.tenantId ?? ""), campaignTaskId: task.publicId }).lean();
+      if (!occurrence) throw new NotFoundException("CAMPAIGN_TASK_OCCURRENCE_NOT_FOUND");
+    }
     await this.enforcePilotLimits(template, input);
     const copy = await DistributionCopyVariantModel.findOne({ copyVariantId: String(input.copyVariantId), templateId: template.templateId, status: "approved" }).lean();
     if (!copy) throw new BadRequestException("APPROVED_DISTRIBUTION_COPY_REQUIRED");
@@ -268,6 +285,7 @@ export class DistributionService {
       screenshotRequirements: assignment.requiredEvidence, postUrlRequirement: template.postUrlRequirement,
       proofDeadline: assignment.proofDeadlineAt, assignmentExpiration: assignment.expiresAt,
       rewardEligibilityRecommendation: assignment.rewardEligibilityRecommendation,
+      occurrenceId: assignment.occurrenceId,
     };
   }
 
@@ -308,6 +326,7 @@ export class DistributionService {
     if (!this.environment.CAMPAIGN_TASK_BROWSER_PROOF_UPLOAD_ENABLED) throw new ConflictException("CAMPAIGN_TASK_BROWSER_PROOF_UPLOAD_DISABLED");
     const assignment = await DistributionAssignmentModel.findOne({ externalAssignmentId: String(input.externalAssignmentId), tenantId: String(input.tenantId), externalUserId: String(input.externalUserId), status: { $in: ["active", "awaiting_proof"] }, proofDeadlineAt: { $gt: new Date() } }).lean();
     if (!assignment) throw new BadRequestException("PROOF_ASSIGNMENT_INVALID_OR_EXPIRED");
+    this.assertOccurrenceBinding(assignment, input.occurrenceId as string | undefined);
     const screenshotCount = Number(input.screenshotCount ?? 1);
     if (screenshotCount < 1 || screenshotCount > this.environment.DISTRIBUTION_MAX_SCREENSHOTS) throw new BadRequestException("PROOF_SCREENSHOT_COUNT_INVALID");
     const hash = digest(idempotencyKey);
@@ -345,6 +364,11 @@ export class DistributionService {
   async addEvidence(proofSubmissionId: string, input: Record<string, unknown>, actor: string) {
     const proof = await ProofSubmissionModel.findOne({ proofSubmissionId, tenantId: String(input.tenantId), externalUserId: actor, status: "more_evidence_required", $or: [{ additionalEvidenceDeadline: { $exists: false } }, { additionalEvidenceDeadline: { $gt: new Date() } }] });
     if (!proof) throw new ConflictException("PROOF_ADDITIONAL_EVIDENCE_NOT_REQUESTED");
+    const assignment = await DistributionAssignmentModel.findOne({ assignmentId: proof.assignmentId }).lean();
+    if (assignment) {
+      if (proof.occurrenceId !== assignment.occurrenceId) throw new ConflictException("PROOF_OCCURRENCE_MISMATCH");
+      this.assertOccurrenceBinding(assignment, input.occurrenceId as string | undefined);
+    }
     const count = Number(input.screenshotCount ?? 1);
     if (count < 1 || count > this.environment.DISTRIBUTION_MAX_SCREENSHOTS) throw new BadRequestException("PROOF_SCREENSHOT_COUNT_INVALID");
     const files = Array.isArray(input.files) ? input.files as Array<Record<string, unknown>> : [];
@@ -371,6 +395,10 @@ export class DistributionService {
   async completeProof(proofSubmissionId: string, externalUserId: string, tenantId?: string) {
     const proof = await ProofSubmissionModel.findOne({ proofSubmissionId, externalUserId, ...(tenantId ? { tenantId } : {}), status: "upload_pending" });
     if (!proof) throw new BadRequestException("PROOF_SUBMISSION_INVALID");
+    const assignment = await DistributionAssignmentModel.findOne({ assignmentId: proof.assignmentId }).lean();
+    if (assignment) {
+      if (proof.occurrenceId !== assignment.occurrenceId) throw new ConflictException("PROOF_OCCURRENCE_MISMATCH");
+    }
     const currentEvidence = (proof.evidence as Array<{ objectKey: string; contentType?: string; contentLength?: number; revision?: number }>).filter((item) => (item.revision ?? 1) === proof.evidenceRevision);
     for (const evidence of currentEvidence) {
       const head = await this.storage.headObject(evidence.objectKey);
@@ -400,6 +428,7 @@ export class DistributionService {
       apiVersion: TASKS_CASH_DISTRIBUTION_API_VERSION,
       proofSubmissionId: proof.proofSubmissionId,
       externalAssignmentId: proof.externalAssignmentId,
+      occurrenceId: proof.occurrenceId,
       status: proof.status,
       evidenceRevision: proof.evidenceRevision,
       revisionHistory: (proof.evidenceAttempts as Array<Record<string, unknown>>).map((attempt) => ({ revision: attempt.revision, createdAt: attempt.createdAt })),
@@ -500,6 +529,19 @@ export class DistributionService {
       tasksCashCallbackEnabled: this.environment.TASKS_CASH_INTEGRATION_ENABLED,
       ...metrics,
     };
+  }
+
+  async reconcileOccurrenceBindings(tenantId: string) {
+    const mismatched = await ProofSubmissionModel.find({ tenantId, occurrenceId: { $exists: true } }).select("proofSubmissionId occurrenceId assignmentId").lean();
+    const results: Array<{ proofSubmissionId: string; assignmentId: string; occurrenceId: string | undefined; assignmentOccurrenceId: string | undefined; status: string }> = [];
+    for (const proof of mismatched) {
+      const assignment = await DistributionAssignmentModel.findOne({ assignmentId: proof.assignmentId }).lean();
+      if (!assignment) continue;
+      if (proof.occurrenceId !== assignment.occurrenceId) {
+        results.push({ proofSubmissionId: proof.proofSubmissionId, assignmentId: proof.assignmentId, occurrenceId: proof.occurrenceId, assignmentOccurrenceId: assignment.occurrenceId, status: "mismatch" });
+      }
+    }
+    return { tenantId, checked: mismatched.length, mismatches: results.length, items: results };
   }
 
   async cleanupExpiredProofs(actor: string) {

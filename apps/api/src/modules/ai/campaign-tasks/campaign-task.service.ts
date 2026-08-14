@@ -327,6 +327,18 @@ export class CampaignTaskService {
         );
         throw new ConflictException("OCCURRENCE_CAPACITY_UNAVAILABLE");
       }
+      if (occurrence.taskRevision !== task.currentRevision) {
+        throw new ConflictException("CAMPAIGN_TASK_OCCURRENCE_REVISION_STALE");
+      }
+      const activeStatuses = ["active", "awaiting_proof", "verification_pending", "needs_review", "more_evidence_required", "queued", "submitted"];
+      const existingInOccurrence = await DistributionAssignmentModel.exists({ externalTaskId: task.publicId, externalUserId: participant.publicId, occurrenceId: occurrence.publicId, status: { $in: activeStatuses } });
+      if (existingInOccurrence) throw new ConflictException("CAMPAIGN_TASK_OCCURRENCE_ALREADY_CLAIMED");
+      const recurrenceConfig = (task.recurrenceConfiguration ?? {}) as { allowRepeat?: boolean };
+      if (recurrenceConfig.allowRepeat === false) {
+        const terminalStatuses = ["completed", "verified", "rejected", "cancelled", "expired", "duplicate", "fraudulent"];
+        const prior = await DistributionAssignmentModel.exists({ externalTaskId: task.publicId, externalUserId: participant.publicId, status: { $in: terminalStatuses } });
+        if (prior) throw new ConflictException("CAMPAIGN_TASK_PARTICIPANT_REPEAT_FORBIDDEN");
+      }
     }
 
     const capacityFilter: Record<string, unknown> = {
