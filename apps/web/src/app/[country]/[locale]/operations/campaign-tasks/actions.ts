@@ -53,9 +53,38 @@ export async function createCampaignTask(form: FormData) {
       screenshotRequired: true,
       postUrlRequirement: "optional",
       timestampRequirement: "optional",
+      recurrenceConfiguration: {
+        enabled: form.get("recurrenceEnabled") === "on",
+        cadence: text(form, "recurrenceCadence") || undefined,
+        interval: Number(text(form, "recurrenceInterval") || 1),
+        weekdays: list(text(form, "recurrenceWeekdays")).map(Number),
+        localTime: text(form, "recurrenceLocalTime") || "09:00",
+        timezone: text(form, "recurrenceTimezone") || "UTC",
+        startDate: text(form, "recurrenceStartDate") || undefined,
+        endDate: text(form, "recurrenceEndDate") || undefined,
+        maxOccurrences: text(form, "recurrenceMaxOccurrences") ? Number(text(form, "recurrenceMaxOccurrences")) : undefined,
+        allowParticipantRepeat: form.get("allowParticipantRepeat") === "on",
+        allowOverlap: false,
+      },
     },
   });
   redirect(`/${country}/${locale}/operations/campaign-tasks/${task.publicId}?tenant=${encodeURIComponent(tenantId)}`);
+}
+
+export async function planCampaignOccurrences(form: FormData) {
+  await requireCampaignTaskOperator("admin");
+  const country = text(form, "country"); const locale = text(form, "locale");
+  const tenantId = text(form, "tenantId"); const taskId = text(form, "taskId");
+  await campaignTaskApi(`/api/admin/ai/campaign-tasks/${taskId}/occurrences/plan`, { method: "POST", tenantId, idempotencyKey: randomUUID(), body: {} });
+  revalidatePath(`/${country}/${locale}/operations/campaign-tasks/${taskId}`);
+}
+
+export async function cancelCampaignOccurrence(form: FormData) {
+  await requireCampaignTaskOperator("admin");
+  const country = text(form, "country"); const locale = text(form, "locale");
+  const tenantId = text(form, "tenantId"); const taskId = text(form, "taskId");
+  await campaignTaskApi(`/api/admin/ai/campaign-tasks/${taskId}/occurrences/${text(form, "occurrenceId")}/cancel`, { method: "POST", tenantId, idempotencyKey: randomUUID(), body: {} });
+  revalidatePath(`/${country}/${locale}/operations/campaign-tasks/${taskId}`);
 }
 
 export async function transitionCampaignTask(form: FormData) {

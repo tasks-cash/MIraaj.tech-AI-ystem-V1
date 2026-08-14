@@ -23,8 +23,8 @@ const baseEnv = {
 
 class FakeQueue {
   enqueued: string[] = [];
-  async enqueue(publicId: string) { this.enqueued.push(publicId); }
-  async deadLetterItem(_publicId: string, _safeError: string) { /* no-op */ }
+  enqueue(publicId: string) { this.enqueued.push(publicId); }
+  deadLetterItem() { /* no-op */ }
 }
 
 describe("NotificationService", () => {
@@ -68,7 +68,7 @@ describe("NotificationService", () => {
 
   it("marks a notification as read", async () => {
     const service = new NotificationService(new FakeQueue() as any);
-    vi.spyOn(NotificationModel, "findOneAndUpdate").mockResolvedValue({ publicId: "ain_1", status: "read" } as any);
+    vi.spyOn(NotificationModel, "findOneAndUpdate").mockResolvedValue({ publicId: "ain_1", status: "read" });
     const result = await service.markRead("ain_1", "t1", "p1");
     expect(result.status).toBe("read");
   });

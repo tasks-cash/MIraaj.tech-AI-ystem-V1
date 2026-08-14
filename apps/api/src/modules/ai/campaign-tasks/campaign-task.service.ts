@@ -9,6 +9,7 @@ import {
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { loadEnvironment } from "../../../environment.js";
 import { AuditEventService } from "../audit/audit-event.service.js";
+import { NotificationService } from "../notifications/notification.service.js";
 import { CampaignPackageModel } from "../models/campaign.schema.js";
 import {
   CampaignTaskInvitationModel,
@@ -16,6 +17,7 @@ import {
   CampaignTaskModel,
   CampaignTaskReservationModel,
   CampaignTaskParticipantCapacityModel,
+  CampaignTaskOccurrenceModel,
   DistributionParticipantModel,
 } from "../models/campaign-task.schema.js";
 import {
@@ -58,6 +60,7 @@ export class CampaignTaskService {
   constructor(
     @Inject(DistributionService) private readonly distribution: DistributionService,
     @Inject(AuditEventService) private readonly audit: AuditEventService,
+    @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
 
   private ensureEnabled(): void {
@@ -254,11 +257,14 @@ export class CampaignTaskService {
     return tasks.filter((task) => evaluateCampaignTaskEligibility(task as any, participant as any).eligible).map((task) => safeCampaignTask(publicValue(task)));
   }
 
-  async claim(publicId: string, tenantId: string, participantId: string, idempotencyKey: string, actor = participantId) {
+  async claim(publicId: string, tenantId: string, participantId: string, idempotencyKey: string, options: { actor?: string; occurrenceId?: string } = {}) {
+    const actor = options.actor ?? participantId;
+    const occurrenceId = options.occurrenceId;
     if (!idempotencyKey.trim()) throw new BadRequestException("IDEMPOTENCY_KEY_REQUIRED");
     const task = await CampaignTaskModel.findOne({ publicId, tenantId }).select("+privateParticipantIds").lean();
     const participant = await DistributionParticipantModel.findOne({ publicId: participantId, tenantId }).lean();
     if (!task || !participant) throw new NotFoundException("CAMPAIGN_TASK_NOT_FOUND");
+    if (task.taskMode === "recurring" && !occurrenceId) throw new BadRequestException("OCCURRENCE_ID_REQUIRED");
     const invitation = await CampaignTaskInvitationModel.findOne({ tenantId, taskId: publicId, participantId, status: { $in: ["accepted", "pending"] }, expiresAt: { $gt: new Date() } }).lean();
     if (["invite_only", "private"].includes(task.taskMode) && !invitation && !task.privateParticipantIds?.includes(participantId)) {
       throw new NotFoundException("CAMPAIGN_TASK_NOT_FOUND");
@@ -298,17 +304,42 @@ export class CampaignTaskService {
 
     const countryPath = `countryCapacityUsed.${participant.country}`;
     const configuredCountryCapacity = Number((task.capacityByCountry as Record<string, number> | undefined)?.[participant.country] ?? 0);
+
+    let occurrence: any;
+    if (task.taskMode === "recurring") {
+      const now = new Date();
+      const countryRef = `$${countryPath}`;
+      const occurrenceFilter: Record<string, unknown> = {
+        publicId: occurrenceId, tenantId, campaignTaskId: publicId, status: "active",
+        assignmentWindowStart: { $lte: now }, assignmentWindowEnd: { $gte: now },
+        $expr: { $lt: ["$activeAssignmentCount", "$capacitySnapshot"] },
+      };
+      if (configuredCountryCapacity > 0) occurrenceFilter.$expr = { $and: [{ $lt: ["$activeAssignmentCount", "$capacitySnapshot"] }, { $lt: [{ $ifNull: [countryRef, 0] }, configuredCountryCapacity] }] };
+      occurrence = await CampaignTaskOccurrenceModel.findOneAndUpdate(
+        occurrenceFilter,
+        { $inc: { activeAssignmentCount: 1, [countryPath]: 1 }, $set: { updatedBy: actor } },
+        { new: true },
+      );
+      if (!occurrence) {
+        await CampaignTaskParticipantCapacityModel.updateOne(
+          { tenantId, taskId: publicId, participantId, activeCount: { $gt: 0 } },
+          { $inc: { activeCount: -1, dailyCount: -1 }, $set: { updatedBy: actor } },
+        );
+        throw new ConflictException("OCCURRENCE_CAPACITY_UNAVAILABLE");
+      }
+    }
+
     const capacityFilter: Record<string, unknown> = {
       publicId, tenantId, status: "active", emergencyStop: false,
       $expr: { $lt: ["$activeAssignmentCount", "$totalCapacity"] },
     };
     if (configuredCountryCapacity > 0) capacityFilter[countryPath] = { $lt: configuredCountryCapacity };
-    const reserved = await CampaignTaskModel.findOneAndUpdate(
+    const reserved = task.taskMode === "recurring" ? null : await CampaignTaskModel.findOneAndUpdate(
       capacityFilter,
       { $inc: { activeAssignmentCount: 1, [countryPath]: 1 }, $set: { updatedBy: actor } },
       { new: true },
     );
-    if (!reserved) {
+    if (task.taskMode !== "recurring" && !reserved) {
       await CampaignTaskParticipantCapacityModel.updateOne(
         { tenantId, taskId: publicId, participantId, activeCount: { $gt: 0 } },
         { $inc: { activeCount: -1, dailyCount: -1 }, $set: { updatedBy: actor } },
@@ -325,26 +356,33 @@ export class CampaignTaskService {
       const copyVariantId = task.approvedCopyVariantIds[0];
       const assignment = await this.distribution.createAssignment({
         apiVersion: "v1", templateId: task.templateId, copyVariantId,
+        tenantId,
         externalTaskId: task.publicId, externalUserId: participant.publicId,
         externalAssignmentId: `cta_${reservationId}`, targetUrl: task.targetUrl,
+        occurrenceId: occurrence ? occurrence.publicId : undefined,
         country: participant.country, correlationId: randomUUID(),
       }, actor, `campaign-task:${hash}`);
       await CampaignTaskReservationModel.updateOne({ publicId: reservationId, tenantId }, { $set: { status: "assigned", assignmentId: assignment.externalAssignmentId, updatedBy: actor } });
       if (invitation) await CampaignTaskInvitationModel.updateOne({ publicId: invitation.publicId }, { $set: { status: "assignment_created", assignmentId: assignment.externalAssignmentId, updatedBy: actor } });
-      if (reserved.activeAssignmentCount >= reserved.totalCapacity) {
+      if (reserved && reserved.activeAssignmentCount >= reserved.totalCapacity) {
         await CampaignTaskModel.updateOne({ publicId, tenantId, status: "active" }, { $set: { status: "capacity_reached", updatedBy: actor } });
       }
-      await this.event(tenantId, publicId, "assignment_ready", actor, { status: assignment.status }, participantId, assignment.externalAssignmentId);
+      await this.event(tenantId, publicId, "assignment_ready", actor, { status: assignment.status, ...(occurrence ? { occurrenceId: occurrence.publicId } : {}) }, participantId, assignment.externalAssignmentId);
       return assignment;
     } catch (error) {
-      await Promise.all([
+      const rollback: Array<Promise<unknown>> = [
         CampaignTaskReservationModel.updateOne({ publicId: reservationId }, { $set: { status: "failed", failureCode: "ASSIGNMENT_CREATION_FAILED", updatedBy: actor } }),
-        CampaignTaskModel.updateOne({ publicId, tenantId }, { $inc: { activeAssignmentCount: -1, [countryPath]: -1 }, $set: { updatedBy: actor } }),
         CampaignTaskParticipantCapacityModel.updateOne(
           { tenantId, taskId: publicId, participantId, activeCount: { $gt: 0 } },
           { $inc: { activeCount: -1, dailyCount: -1 }, $set: { updatedBy: actor } },
         ),
-      ]);
+      ];
+      if (task.taskMode === "recurring" && occurrence) {
+        rollback.push(CampaignTaskOccurrenceModel.updateOne({ publicId: occurrence.publicId, tenantId }, { $inc: { activeAssignmentCount: -1, [countryPath]: -1 }, $set: { updatedBy: actor } }));
+      } else if (reserved) {
+        rollback.push(CampaignTaskModel.updateOne({ publicId, tenantId }, { $inc: { activeAssignmentCount: -1, [countryPath]: -1 }, $set: { updatedBy: actor } }));
+      }
+      await Promise.all(rollback);
       await this.event(tenantId, publicId, "assignment_failed", actor, { safeErrorCode: "ASSIGNMENT_CREATION_FAILED" }, participantId);
       throw error;
     }
@@ -358,7 +396,7 @@ export class CampaignTaskService {
     if (!task || task.taskMode !== "manual_assignment") {
       throw new BadRequestException("CAMPAIGN_TASK_MANUAL_ASSIGNMENT_INVALID");
     }
-    return this.claim(publicId, tenantId, participantId, idempotencyKey, actor);
+    return this.claim(publicId, tenantId, participantId, idempotencyKey, { actor });
   }
 
   async statistics(publicId: string, tenantId: string) {
@@ -422,13 +460,13 @@ export class CampaignTaskService {
   async reviewProof(publicId: string, proofSubmissionId: string, tenantId: string, actor: string, input: Record<string, unknown>) {
     const task = await CampaignTaskModel.exists({ publicId, tenantId });
     if (!task) throw new NotFoundException("CAMPAIGN_TASK_NOT_FOUND");
-    const proof = await ProofSubmissionModel.findOne({ proofSubmissionId }).select("assignmentId").lean();
+    const proof = await ProofSubmissionModel.findOne({ proofSubmissionId }).select("assignmentId externalUserId").lean();
     const assignment = proof ? await DistributionAssignmentModel.exists({ assignmentId: proof.assignmentId, externalTaskId: publicId }) : null;
     if (!proof || !assignment) {
       throw new NotFoundException("CAMPAIGN_TASK_PROOF_NOT_FOUND");
     }
     const review = await this.distribution.reviewProof(proofSubmissionId, input, actor);
-    await this.event(tenantId, publicId, String(input.decision) === "verified" ? "proof_verified" : String(input.decision) === "request_more_evidence" ? "more_evidence_requested" : String(input.decision) === "duplicate" ? "proof_duplicate" : String(input.decision) === "fraudulent" ? "proof_suspicious" : "proof_rejected", actor, { proofSubmissionId });
+    await this.event(tenantId, publicId, String(input.decision) === "verified" ? "proof_verified" : String(input.decision) === "request_more_evidence" ? "more_evidence_requested" : String(input.decision) === "duplicate" ? "proof_duplicate" : String(input.decision) === "fraudulent" ? "proof_suspicious" : "proof_rejected", actor, { proofSubmissionId }, proof.externalUserId, proof.assignmentId);
     return review;
   }
 
@@ -471,10 +509,20 @@ export class CampaignTaskService {
     participantId?: string,
     assignmentId?: string,
   ) {
-    return CampaignTaskEventModel.create({
+    const event = await CampaignTaskEventModel.create({
       publicId: `ace_${randomUUID()}`, tenantId, taskId, eventType, safePayload,
       ...(participantId ? { participantId } : {}), ...(assignmentId ? { assignmentId } : {}),
       occurredAt: new Date(), createdBy: actor, updatedBy: actor, correlationId: randomUUID(),
     });
+    if (participantId && ["invitation_created", "invitation_cancelled", "assignment_ready", "assignment_cancelled", "proof_deadline_approaching", "proof_received", "proof_verification_started", "more_evidence_requested", "proof_verified", "proof_rejected", "proof_duplicate", "proof_suspicious", "assignment_expired"].includes(eventType)) {
+      await this.notifications.create({
+        tenantId, audienceId: participantId, audienceType: "participant", notificationType: eventType,
+        localizedParameters: { taskId, ...(assignmentId ? { assignmentId } : {}) },
+        safeActionType: assignmentId ? "assignment" : "task", safeActionTarget: assignmentId ?? taskId,
+        deduplicationKey: `${eventType}:${assignmentId ?? taskId}:${String(safePayload.proofSubmissionId ?? "")}`,
+        correlationId: event.correlationId,
+      });
+    }
+    return event;
   }
 }

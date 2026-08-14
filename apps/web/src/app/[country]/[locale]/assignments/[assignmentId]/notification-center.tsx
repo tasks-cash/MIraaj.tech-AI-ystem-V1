@@ -1,18 +1,17 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type NotificationItem = { publicId: string; notificationType: string; titleKey: string; messageKey: string; localizedParameters: Record<string, string | number | boolean>; status: string; safeActionType: string; safeActionTarget: string; createdAt: string };
 export function NotificationCenter({ contextToken, locale }: { contextToken: string; locale: string }) {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [unread, setUnread] = useState(0);
-  const headers = { "content-type": "application/json", authorization: `Bearer ${contextToken}` };
+  const headers = useMemo(() => ({ "content-type": "application/json", authorization: `Bearer ${contextToken}` }), [contextToken]);
   const load = useCallback(async () => {
     const [list, count] = await Promise.all([
       fetch("/api/campaign-task/notifications?limit=20", { headers, cache: "no-store" }).then((value) => value.json()) as Promise<{ items: NotificationItem[] }>,
       fetch("/api/campaign-task/notifications/unread-count", { headers, cache: "no-store" }).then((value) => value.json()) as Promise<{ unread: number }>,
     ]); setItems(list.items ?? []); setUnread(count.unread ?? 0);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, participantId]);
+  }, [headers]);
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);

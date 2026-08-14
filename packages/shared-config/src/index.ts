@@ -604,7 +604,7 @@ export function verifyParticipantContextToken(
   }
   let payload: Record<string, unknown>;
   try {
-    payload = JSON.parse(base64UrlDecode(payloadBase64Url).toString("utf8"));
+    payload = JSON.parse(base64UrlDecode(payloadBase64Url).toString("utf8")) as Record<string, unknown>;
   } catch {
     throw new Error("INVALID_PARTICIPANT_CONTEXT_TOKEN");
   }

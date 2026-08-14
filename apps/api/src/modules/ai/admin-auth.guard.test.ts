@@ -31,6 +31,7 @@ const baseEnv = {
   TEMPORARY_ADMIN_TOKEN_ENABLED: "true",
   ALLOW_TEMPORARY_ADMIN_TOKEN_IN_PRODUCTION: "false",
   ADMIN_API_TOKEN: "test-only-admin-token-with-32-characters!!",
+    CAMPAIGN_TASK_PARTICIPANT_API_TOKEN: "test-only-participant-token-with-32-chars",
 } as const;
 
 function createContext(authorization?: string) {

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireCampaignTaskOperator } from "@/lib/campaign-task-auth";
 import { campaignTaskApi, type CampaignTaskView } from "@/lib/campaign-task-api";
-import { reviewCampaignProof, transitionCampaignTask } from "../actions";
+import { cancelCampaignOccurrence, planCampaignOccurrences, reviewCampaignProof, transitionCampaignTask } from "../actions";
 
 interface Statistics {
   capacity: { total: number; used: number; remaining: number; byCountry: Record<string, number> };
@@ -11,6 +11,7 @@ interface Statistics {
 }
 interface Assignment { externalAssignmentId: string; externalUserId: string; status: string; country: string; language: string; proofDeadlineAt: string }
 interface Proof { proofSubmissionId: string; externalUserId: string; status: string; evidenceRevision: number; submittedAt?: string; latestAttempt?: { decision: string; reasonCodes: string[]; scores: Record<string, number> } }
+interface Occurrence { publicId: string; scheduledFor: string; status: string; occurrenceNumber: number; timezone: string; capacitySnapshot: number }
 
 export default async function CampaignTaskDetail({
   params,
@@ -28,6 +29,14 @@ export default async function CampaignTaskDetail({
     campaignTaskApi<Assignment[]>(`/api/admin/ai/campaign-tasks/${taskId}/assignments`, { tenantId: tenant }),
     campaignTaskApi<Proof[]>(`/api/admin/ai/campaign-tasks/${taskId}/proofs`, { tenantId: tenant }),
   ]);
+  let occurrences: Occurrence[] = [];
+  let occurrencePreview: Array<{ recurrenceKey: string; scheduledFor: string; timezone: string }> = [];
+  if (task.recurrenceConfiguration?.enabled) {
+    [occurrences, occurrencePreview] = await Promise.all([
+      campaignTaskApi<Occurrence[]>(`/api/admin/ai/campaign-tasks/${taskId}/occurrences`, { tenantId: tenant }).catch(() => []),
+      campaignTaskApi<Array<{ recurrenceKey: string; scheduledFor: string; timezone: string }>>(`/api/admin/ai/campaign-tasks/${taskId}/occurrences/preview?count=5`, { tenantId: tenant }).catch(() => []),
+    ]);
+  }
   const transitions = task.status === "draft" ? ["submit-review", "cancel"] : task.status === "awaiting_review" ? ["approve", "cancel"] : task.status === "approved" ? ["schedule", "activate", "cancel", "archive"] : task.status === "active" ? ["pause", "complete", "cancel"] : task.status === "paused" ? ["resume", "complete", "cancel"] : ["archive"];
   return (
     <section className="min-h-screen bg-slate-50 px-5 py-16">
@@ -62,6 +71,7 @@ export default async function CampaignTaskDetail({
             {!proofs.length ? <p className="mt-5 text-slate-500">No proof submissions are linked to this task.</p> : null}
           </div>
           <aside className="space-y-6">
+            {task.recurrenceConfiguration?.enabled && <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 className="text-xl font-black">Recurring schedule</h2><p className="mt-2 text-sm text-slate-600">{task.recurrenceConfiguration.cadence} · every {task.recurrenceConfiguration.interval} · {task.recurrenceConfiguration.timezone}</p><form action={planCampaignOccurrences} className="mt-4"><input type="hidden" name="country" value={country} /><input type="hidden" name="locale" value={locale} /><input type="hidden" name="tenantId" value={tenant} /><input type="hidden" name="taskId" value={taskId} /><button className="rounded-lg bg-blue-700 px-4 py-2 font-bold text-white">Plan occurrences</button></form><h3 className="mt-5 font-bold">Next occurrences</h3><ul className="mt-2 text-sm text-slate-600">{occurrencePreview.map((item) => <li key={item.recurrenceKey}>{new Date(item.scheduledFor).toLocaleString(locale)} · {item.timezone}</li>)}</ul><h3 className="mt-5 font-bold">History</h3><ul className="mt-2 space-y-2">{occurrences.map((item) => <li key={item.publicId} className="rounded-lg bg-slate-50 p-3 text-sm"><span className="font-bold">#{item.occurrenceNumber} {item.status}</span><span className="block text-slate-500">{new Date(item.scheduledFor).toLocaleString(locale)}</span>{item.status === "scheduled" && <form action={cancelCampaignOccurrence}><input type="hidden" name="country" value={country} /><input type="hidden" name="locale" value={locale} /><input type="hidden" name="tenantId" value={tenant} /><input type="hidden" name="taskId" value={taskId} /><input type="hidden" name="occurrenceId" value={item.publicId} /><button className="mt-2 text-red-700 underline">Cancel occurrence</button></form>}</li>)}</ul></div>}
             <form action={transitionCampaignTask} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <h2 className="text-xl font-black">Lifecycle control</h2>
               <input type="hidden" name="country" value={country} /><input type="hidden" name="locale" value={locale} /><input type="hidden" name="tenantId" value={tenant} /><input type="hidden" name="taskId" value={taskId} /><input type="hidden" name="revision" value={task.currentRevision} />

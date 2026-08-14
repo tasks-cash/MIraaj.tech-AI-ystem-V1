@@ -198,7 +198,8 @@ export class DistributionService {
     ]);
     const assignmentFingerprint = digest(`${input.externalTaskId}|${input.externalUserId}|${template.templateId}|${template.revision}|${copy.copyVariantId}|${copy.revision}`);
     await DistributionAssignmentModel.create({
-      assignmentId, externalTaskId: String(input.externalTaskId), externalUserId: String(input.externalUserId), externalAssignmentId,
+      assignmentId, tenantId: input.tenantId ? String(input.tenantId) : undefined, externalTaskId: String(input.externalTaskId), externalUserId: String(input.externalUserId), externalAssignmentId,
+      ...(input.occurrenceId ? { occurrenceId: String(input.occurrenceId) } : {}),
       templateId: template.templateId, templateRevision: template.revision, copyVariantId: copy.copyVariantId, copyVariantRevision: copy.revision,
       platform: template.platform, audienceType: template.audienceType, country: String(input.country ?? template.countryCodes[0]), language: copy.language, locale: copy.locale, direction: copy.direction,
       expiresAt, proofDeadlineAt, requiredEvidence: { screenshot: template.screenshotRequired, qr: template.qrRequired, proofMarker: template.proofMarkerRequired, postUrl: template.postUrlRequirement },
@@ -304,7 +305,8 @@ export class DistributionService {
     if (!this.environment.DISTRIBUTION_PROOF_PROCESSING_ENABLED || this.environment.DISTRIBUTION_EMERGENCY_PROOF_STOP) {
       throw new ConflictException("DISTRIBUTION_PROOF_PROCESSING_DISABLED");
     }
-    const assignment = await DistributionAssignmentModel.findOne({ externalAssignmentId: String(input.externalAssignmentId), externalUserId: String(input.externalUserId), status: { $in: ["active", "awaiting_proof"] }, proofDeadlineAt: { $gt: new Date() } }).lean();
+    if (!this.environment.CAMPAIGN_TASK_BROWSER_PROOF_UPLOAD_ENABLED) throw new ConflictException("CAMPAIGN_TASK_BROWSER_PROOF_UPLOAD_DISABLED");
+    const assignment = await DistributionAssignmentModel.findOne({ externalAssignmentId: String(input.externalAssignmentId), tenantId: String(input.tenantId), externalUserId: String(input.externalUserId), status: { $in: ["active", "awaiting_proof"] }, proofDeadlineAt: { $gt: new Date() } }).lean();
     if (!assignment) throw new BadRequestException("PROOF_ASSIGNMENT_INVALID_OR_EXPIRED");
     const screenshotCount = Number(input.screenshotCount ?? 1);
     if (screenshotCount < 1 || screenshotCount > this.environment.DISTRIBUTION_MAX_SCREENSHOTS) throw new BadRequestException("PROOF_SCREENSHOT_COUNT_INVALID");
@@ -312,13 +314,20 @@ export class DistributionService {
     const existing = await ProofSubmissionModel.findOne({ idempotencyKeyHash: hash }).lean();
     if (existing) return existing;
     const proofSubmissionId = `dps_${randomUUID()}`;
+    const files = Array.isArray(input.files) ? input.files as Array<Record<string, unknown>> : [];
+    if (files.length && files.length !== screenshotCount) throw new BadRequestException("PROOF_FILE_METADATA_INVALID");
     const evidence = await Promise.all(Array.from({ length: screenshotCount }, async (_, index) => {
+      const metadata = files[index] ?? {};
+      const contentType = String(metadata.contentType ?? "image/png");
+      const contentLength = Number(metadata.contentLength ?? input.contentLength ?? 0);
+      if (!["image/png", "image/jpeg", "image/webp"].includes(contentType)) throw new BadRequestException("PROOF_FILE_TYPE_UNSUPPORTED");
+      if (!Number.isInteger(contentLength) || contentLength < 1 || contentLength > this.environment.DISTRIBUTION_MAX_SCREENSHOT_BYTES) throw new BadRequestException("PROOF_FILE_SIZE_INVALID");
       const objectKey = `distribution/proofs/${assignment.assignmentId}/${proofSubmissionId}/screenshot-${index + 1}`;
-      const upload = await this.storage.createPresignedUpload({ objectKey, contentType: "image/png", contentLength: Number(input.contentLength ?? this.environment.DISTRIBUTION_MAX_SCREENSHOT_BYTES) });
-      return { evidenceId: `ev_${randomUUID()}`, kind: "screenshot", objectKey, contentType: "image/png", uploadUrl: upload.uploadUrl, uploadExpiresAt: upload.expiresAt };
+      const upload = await this.storage.createPresignedUpload({ objectKey, contentType, contentLength });
+      return { evidenceId: `ev_${randomUUID()}`, kind: "screenshot", objectKey, contentType, contentLength, originalFileName: String(metadata.fileName ?? "").slice(0, 200), uploadUrl: upload.uploadUrl, uploadExpiresAt: upload.expiresAt };
     }));
     const retentionExpiresAt = new Date(Date.now() + this.environment.DISTRIBUTION_PROOF_RETENTION_DAYS * 86_400_000);
-    await ProofSubmissionModel.create({ proofSubmissionId, assignmentId: assignment.assignmentId, externalAssignmentId: assignment.externalAssignmentId, externalUserId: assignment.externalUserId, evidence, evidenceAttempts: [{ revision: 1, evidence: evidence.map((item) => ({ evidenceId: item.evidenceId, kind: item.kind, objectKey: item.objectKey, contentType: item.contentType, uploadExpiresAt: item.uploadExpiresAt })), createdAt: new Date(), actor }], postUrl: input.postUrl, claimedPublicationAt: input.claimedPublicationAt, claimedGroupName: input.claimedGroupName, userNote: input.userNote, idempotencyKeyHash: hash, retentionExpiresAt, createdBy: actor, correlationId: String(input.correlationId ?? randomUUID()) });
+    await ProofSubmissionModel.create({ proofSubmissionId, tenantId: assignment.tenantId, assignmentId: assignment.assignmentId, externalAssignmentId: assignment.externalAssignmentId, occurrenceId: assignment.occurrenceId, externalUserId: assignment.externalUserId, evidence, evidenceAttempts: [{ revision: 1, evidence: evidence.map((item) => ({ evidenceId: item.evidenceId, kind: item.kind, objectKey: item.objectKey, contentType: item.contentType, contentLength: item.contentLength, originalFileName: item.originalFileName, uploadExpiresAt: item.uploadExpiresAt })), createdAt: new Date(), actor }], postUrl: input.postUrl, claimedPublicationAt: input.claimedPublicationAt, claimedGroupName: input.claimedGroupName, userNote: input.userNote, idempotencyKeyHash: hash, retentionExpiresAt, createdBy: actor, correlationId: String(input.correlationId ?? randomUUID()) });
     return {
       apiVersion: TASKS_CASH_DISTRIBUTION_API_VERSION,
       proofSubmissionId,
@@ -334,30 +343,38 @@ export class DistributionService {
   }
 
   async addEvidence(proofSubmissionId: string, input: Record<string, unknown>, actor: string) {
-    const proof = await ProofSubmissionModel.findOne({ proofSubmissionId, status: "more_evidence_required" });
+    const proof = await ProofSubmissionModel.findOne({ proofSubmissionId, tenantId: String(input.tenantId), externalUserId: actor, status: "more_evidence_required", $or: [{ additionalEvidenceDeadline: { $exists: false } }, { additionalEvidenceDeadline: { $gt: new Date() } }] });
     if (!proof) throw new ConflictException("PROOF_ADDITIONAL_EVIDENCE_NOT_REQUESTED");
     const count = Number(input.screenshotCount ?? 1);
     if (count < 1 || count > this.environment.DISTRIBUTION_MAX_SCREENSHOTS) throw new BadRequestException("PROOF_SCREENSHOT_COUNT_INVALID");
+    const files = Array.isArray(input.files) ? input.files as Array<Record<string, unknown>> : [];
+    if (files.length !== count) throw new BadRequestException("PROOF_FILE_METADATA_INVALID");
     const revision = proof.evidenceRevision + 1;
     const evidence = await Promise.all(Array.from({ length: count }, async (_, index) => {
+      const metadata = files[index] ?? {};
+      const contentType = String(metadata.contentType ?? "");
+      const contentLength = Number(metadata.contentLength ?? 0);
+      if (!["image/png", "image/jpeg", "image/webp"].includes(contentType)) throw new BadRequestException("PROOF_FILE_TYPE_UNSUPPORTED");
+      if (!Number.isInteger(contentLength) || contentLength < 1 || contentLength > this.environment.DISTRIBUTION_MAX_SCREENSHOT_BYTES) throw new BadRequestException("PROOF_FILE_SIZE_INVALID");
       const objectKey = `distribution/proofs/${proof.assignmentId}/${proofSubmissionId}/revision-${revision}-${index + 1}`;
-      const upload = await this.storage.createPresignedUpload({ objectKey, contentType: "image/png", contentLength: Number(input.contentLength ?? this.environment.DISTRIBUTION_MAX_SCREENSHOT_BYTES) });
-      return { evidenceId: `ev_${randomUUID()}`, kind: "screenshot", objectKey, contentType: "image/png", uploadUrl: upload.uploadUrl, uploadExpiresAt: upload.expiresAt, revision };
+      const upload = await this.storage.createPresignedUpload({ objectKey, contentType, contentLength });
+      return { evidenceId: `ev_${randomUUID()}`, kind: "screenshot", objectKey, contentType, contentLength, originalFileName: String(metadata.fileName ?? "").slice(0, 200), uploadUrl: upload.uploadUrl, uploadExpiresAt: upload.expiresAt, revision };
     }));
     proof.evidenceRevision = revision;
     proof.evidence.push(...evidence);
-    proof.evidenceAttempts.push({ revision, evidence: evidence.map((item) => ({ evidenceId: item.evidenceId, kind: item.kind, objectKey: item.objectKey, contentType: item.contentType, uploadExpiresAt: item.uploadExpiresAt, revision: item.revision })), createdAt: new Date(), actor });
+    proof.evidenceAttempts.push({ revision, evidence: evidence.map((item) => ({ evidenceId: item.evidenceId, kind: item.kind, objectKey: item.objectKey, contentType: item.contentType, contentLength: item.contentLength, originalFileName: item.originalFileName, uploadExpiresAt: item.uploadExpiresAt, revision: item.revision })), createdAt: new Date(), actor });
     proof.status = "upload_pending";
     await proof.save();
     return { proofSubmissionId, evidenceRevision: revision, evidence: evidence.map((item) => ({ evidenceId: item.evidenceId, kind: item.kind, contentType: item.contentType, uploadUrl: item.uploadUrl, uploadExpiresAt: item.uploadExpiresAt, revision: item.revision })) };
   }
 
-  async completeProof(proofSubmissionId: string, externalUserId: string) {
-    const proof = await ProofSubmissionModel.findOne({ proofSubmissionId, externalUserId, status: "upload_pending" });
+  async completeProof(proofSubmissionId: string, externalUserId: string, tenantId?: string) {
+    const proof = await ProofSubmissionModel.findOne({ proofSubmissionId, externalUserId, ...(tenantId ? { tenantId } : {}), status: "upload_pending" });
     if (!proof) throw new BadRequestException("PROOF_SUBMISSION_INVALID");
-    for (const evidence of proof.evidence as Array<{ objectKey: string }>) {
+    const currentEvidence = (proof.evidence as Array<{ objectKey: string; contentType?: string; contentLength?: number; revision?: number }>).filter((item) => (item.revision ?? 1) === proof.evidenceRevision);
+    for (const evidence of currentEvidence) {
       const head = await this.storage.headObject(evidence.objectKey);
-      if (!head.exists || !head.contentLength || head.contentLength > this.environment.DISTRIBUTION_MAX_SCREENSHOT_BYTES) throw new BadRequestException("PROOF_EVIDENCE_INVALID");
+      if (!head.exists || !head.contentLength || head.contentLength !== evidence.contentLength || head.contentLength > this.environment.DISTRIBUTION_MAX_SCREENSHOT_BYTES || head.contentType !== evidence.contentType) throw new BadRequestException("PROOF_EVIDENCE_INVALID");
     }
     proof.status = "queued";
     proof.submittedAt = new Date();
@@ -374,9 +391,9 @@ export class DistributionService {
   }
 
   getProof(id: string) { return ProofSubmissionModel.findOne({ proofSubmissionId: id }).lean().orFail(() => new NotFoundException("PROOF_SUBMISSION_NOT_FOUND")); }
-  async getProofForExternalUser(id: string, externalUserId: string) {
-    const proof = await ProofSubmissionModel.findOne({ proofSubmissionId: id, externalUserId })
-      .select("proofSubmissionId externalAssignmentId status submittedAt createdAt updatedAt")
+  async getProofForExternalUser(id: string, externalUserId: string, tenantId?: string) {
+    const proof = await ProofSubmissionModel.findOne({ proofSubmissionId: id, externalUserId, ...(tenantId ? { tenantId } : {}) })
+      .select("proofSubmissionId externalAssignmentId status submittedAt createdAt updatedAt evidenceRevision evidenceAttempts additionalEvidenceRequest additionalEvidenceDeadline")
       .lean();
     if (!proof) throw new NotFoundException("PROOF_SUBMISSION_NOT_FOUND");
     return {
@@ -384,6 +401,10 @@ export class DistributionService {
       proofSubmissionId: proof.proofSubmissionId,
       externalAssignmentId: proof.externalAssignmentId,
       status: proof.status,
+      evidenceRevision: proof.evidenceRevision,
+      revisionHistory: (proof.evidenceAttempts as Array<Record<string, unknown>>).map((attempt) => ({ revision: attempt.revision, createdAt: attempt.createdAt })),
+      additionalEvidenceRequest: proof.additionalEvidenceRequest,
+      additionalEvidenceDeadline: proof.additionalEvidenceDeadline,
       submittedAt: proof.submittedAt,
       createdAt: proof.createdAt,
       updatedAt: proof.updatedAt,
@@ -434,7 +455,13 @@ export class DistributionService {
       fraud: this.environment.DISTRIBUTION_FRAUD_PROOF_RETENTION_DAYS,
     });
     await Promise.all([
-      ProofSubmissionModel.updateOne({ proofSubmissionId }, { $set: { status: finalStatus, retentionClass, retentionExpiresAt: new Date(Date.now() + days * 86_400_000) } }),
+      ProofSubmissionModel.updateOne({ proofSubmissionId }, { $set: {
+        status: finalStatus, retentionClass, retentionExpiresAt: new Date(Date.now() + days * 86_400_000),
+        ...(decision === "request_more_evidence" ? {
+          additionalEvidenceRequest: String(input.reviewerNote ?? input.reason ?? "").slice(0, 1_000),
+          additionalEvidenceDeadline: new Date(String(input.additionalEvidenceDeadline ?? Date.now() + 24 * 60 * 60_000)),
+        } : {}),
+      } }),
       DistributionAssignmentModel.updateOne({ assignmentId: proof.assignmentId }, { $set: { status: finalStatus, latestVerificationDecision: decision, rewardEligibilityRecommendation: reward } }),
     ]);
     const eventDecision = decision === "verified" ? "verified" : decision === "request_more_evidence" ? "needs_review" : "rejected";

@@ -53,14 +53,35 @@ export const createCampaignTaskSchema = z.object({
   recurrenceConfiguration: z.object({
     enabled: z.boolean().default(false),
     cadence: z.enum(["daily", "weekly"]).optional(),
+    interval: z.number().int().min(1).max(52).default(1),
+    weekdays: z.array(z.number().int().min(0).max(6)).max(7).default([]),
+    localTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default("09:00"),
+    timezone: z.string().trim().min(1).max(100).default("UTC"),
+    startDate: z.iso.date().optional(),
+    endDate: z.iso.date().optional(),
     maxOccurrences: z.number().int().min(1).max(365).optional(),
-  }).default({ enabled: false }),
+    allowParticipantRepeat: z.boolean().default(true),
+    allowOverlap: z.boolean().default(false),
+  }).default({ enabled: false, interval: 1, weekdays: [], localTime: "09:00", timezone: "UTC", allowParticipantRepeat: true, allowOverlap: false }),
 }).strict().superRefine((value, context) => {
   if (value.endAt && value.startAt && new Date(value.endAt) <= new Date(value.startAt)) {
     context.addIssue({ code: "custom", path: ["endAt"], message: "endAt must follow startAt" });
   }
   if (value.taskMode === "pilot" && (!value.pilotConfiguration.enabled || value.humanReviewPolicy !== "always")) {
     context.addIssue({ code: "custom", path: ["pilotConfiguration"], message: "pilot tasks require an enabled pilot and mandatory review" });
+  }
+  const recurrence = value.recurrenceConfiguration;
+  if (recurrence.enabled && !recurrence.cadence) {
+    context.addIssue({ code: "custom", path: ["recurrenceConfiguration", "cadence"], message: "cadence is required" });
+  }
+  if (recurrence.enabled && recurrence.cadence === "weekly" && recurrence.weekdays.length === 0) {
+    context.addIssue({ code: "custom", path: ["recurrenceConfiguration", "weekdays"], message: "weekly recurrence requires weekdays" });
+  }
+  if (recurrence.endDate && recurrence.startDate && recurrence.endDate < recurrence.startDate) {
+    context.addIssue({ code: "custom", path: ["recurrenceConfiguration", "endDate"], message: "endDate must follow startDate" });
+  }
+  try { new Intl.DateTimeFormat("en", { timeZone: recurrence.timezone }); } catch {
+    context.addIssue({ code: "custom", path: ["recurrenceConfiguration", "timezone"], message: "invalid timezone" });
   }
 });
 

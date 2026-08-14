@@ -14,6 +14,7 @@ const baseEnvironment = {
   AI_SERVICE_URL: "http://localhost:8200",
   AI_SERVICE_INTERNAL_SECRET: "test-internal-secret-with-at-least-32-characters",
   ADMIN_API_TOKEN: "test-admin-token-with-at-least-32-characters",
+  CAMPAIGN_TASK_PARTICIPANT_API_TOKEN: "test-participant-token-with-at-least-32-characters",
 } as const;
 
 describe("API environment policy", () => {

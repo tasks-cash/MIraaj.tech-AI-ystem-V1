@@ -90,9 +90,11 @@ copyVariantSchema.index({ templateId: 1, revision: 1, locale: 1 }, { unique: tru
 const assignmentSchema = new Schema(
   {
     assignmentId: { type: String, required: true, unique: true, index: true },
+    tenantId: { type: String, index: true },
     externalTaskId: { type: String, required: true, index: true },
     externalUserId: { type: String, required: true, index: true },
     externalAssignmentId: { type: String, required: true, unique: true, index: true },
+    occurrenceId: { type: String, index: true },
     templateId: { type: String, required: true, index: true },
     templateRevision: { type: Number, required: true },
     copyVariantId: { type: String, required: true },
@@ -160,8 +162,10 @@ const headerAssetSchema = new Schema({ headerAssetId: { type: String, required: 
 const proofSubmissionSchema = new Schema(
   {
     proofSubmissionId: { type: String, required: true, unique: true, index: true },
+    tenantId: { type: String, index: true },
     assignmentId: { type: String, required: true, index: true },
     externalAssignmentId: { type: String, required: true, index: true },
+    occurrenceId: { type: String, index: true },
     externalUserId: { type: String, required: true, index: true },
     status: { type: String, enum: ["upload_pending", "submitted", "queued", "verifying", "needs_review", "more_evidence_required", "verified", "rejected", "duplicate", "fraudulent", "cancelled"], default: "upload_pending", index: true },
     evidence: { type: [Schema.Types.Mixed], default: [] },
@@ -171,6 +175,8 @@ const proofSubmissionSchema = new Schema(
     claimedPublicationAt: { type: Date },
     claimedGroupName: { type: String },
     userNote: { type: String },
+    additionalEvidenceRequest: { type: String },
+    additionalEvidenceDeadline: { type: Date },
     idempotencyKeyHash: { type: String, required: true, unique: true },
     submittedAt: { type: Date },
     retentionExpiresAt: { type: Date, required: true },

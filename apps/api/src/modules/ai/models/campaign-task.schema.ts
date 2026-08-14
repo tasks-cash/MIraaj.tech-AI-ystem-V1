@@ -186,6 +186,36 @@ const participantCapacitySchema = new Schema(
 );
 participantCapacitySchema.index({ tenantId: 1, taskId: 1, participantId: 1 }, { unique: true });
 
+const occurrenceSchema = new Schema(
+  {
+    publicId: { type: String, required: true, unique: true, index: true },
+    campaignTaskId: { type: String, required: true, index: true },
+    taskRevision: { type: Number, required: true, min: 1 },
+    recurrenceKey: { type: String, required: true },
+    scheduledFor: { type: Date, required: true, index: true },
+    timezone: { type: String, required: true },
+    occurrenceNumber: { type: Number, required: true, min: 1 },
+    status: { type: String, enum: ["scheduled", "activating", "active", "completed", "skipped", "cancelled", "failed"], default: "scheduled", index: true },
+    capacitySnapshot: { type: Number, required: true, min: 1 },
+    activeAssignmentCount: { type: Number, default: 0, min: 0 },
+    completedAssignmentCount: { type: Number, default: 0, min: 0 },
+    countryCapacityUsed: { type: Schema.Types.Mixed, default: {} },
+    assignmentWindowStart: { type: Date, required: true },
+    assignmentWindowEnd: { type: Date, required: true },
+    proofDeadline: { type: Date, required: true },
+    createdByScheduler: { type: Boolean, default: true },
+    activatedAt: { type: Date },
+    completedAt: { type: Date },
+    cancelledAt: { type: Date },
+    lastSafeErrorCode: { type: String },
+    ...auditFields,
+  },
+  { timestamps: true, collection: "ai_campaign_task_occurrences" },
+);
+occurrenceSchema.index({ tenantId: 1, campaignTaskId: 1, recurrenceKey: 1 }, { unique: true });
+occurrenceSchema.index({ status: 1, scheduledFor: 1 });
+occurrenceSchema.index({ tenantId: 1, campaignTaskId: 1, scheduledFor: -1 });
+
 function model(name: string, schema: Schema): Model<any> {
   return mongoose.models[name] ?? mongoose.model(name, schema);
 }
@@ -196,3 +226,4 @@ export const CampaignTaskInvitationModel = model("AiCampaignTaskInvitation", inv
 export const CampaignTaskReservationModel = model("AiCampaignTaskReservation", reservationSchema);
 export const CampaignTaskEventModel = model("AiCampaignTaskEvent", campaignTaskEventSchema);
 export const CampaignTaskParticipantCapacityModel = model("AiCampaignTaskParticipantCapacity", participantCapacitySchema);
+export const CampaignTaskOccurrenceModel = model("AiCampaignTaskOccurrence", occurrenceSchema);

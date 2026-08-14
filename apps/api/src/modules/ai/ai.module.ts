@@ -10,6 +10,7 @@ import { ReviewService } from "./analysis/review.service.js";
 import { AiPermissionGuard } from "./guards/ai-permission.guard.js";
 import { AiSystemStatusRateLimitGuard } from "./guards/ai-system-status-rate-limit.guard.js";
 import { AdminAuthGuard } from "./guards/admin-auth.guard.js";
+import { CampaignTaskParticipantAuthGuard } from "./guards/campaign-task-participant-auth.guard.js";
 import { MediaController } from "./media/media.controller.js";
 import { MediaService } from "./media/media.service.js";
 import { UploadSessionController } from "./media/upload-session.controller.js";
@@ -74,6 +75,13 @@ import {
   CampaignTaskParticipantController,
 } from "./campaign-tasks/campaign-task.controller.js";
 import { CampaignTaskService } from "./campaign-tasks/campaign-task.service.js";
+import { CampaignTaskRecurringService } from "./campaign-tasks/campaign-task-recurring.service.js";
+import { CampaignTaskRecurringWorker } from "./campaign-tasks/campaign-task-recurring.worker.js";
+import { CampaignTaskRecurringQueueService } from "./queue/campaign-task-recurring-queue.service.js";
+import { NotificationController } from "./notifications/notification.controller.js";
+import { NotificationService } from "./notifications/notification.service.js";
+import { NotificationWorker } from "./notifications/notification.worker.js";
+import { NotificationQueueService } from "./queue/notification-queue.service.js";
 
 @Module({
   imports: [
@@ -101,6 +109,7 @@ import { CampaignTaskService } from "./campaign-tasks/campaign-task.service.js";
     TasksCashDistributionController,
     CampaignTaskAdminController,
     CampaignTaskParticipantController,
+    NotificationController,
   ],
   providers: [
     AiService,
@@ -109,6 +118,7 @@ import { CampaignTaskService } from "./campaign-tasks/campaign-task.service.js";
     AiPermissionGuard,
     AiSystemStatusRateLimitGuard,
     AdminAuthGuard,
+    CampaignTaskParticipantAuthGuard,
     UploadSessionService,
     MediaService,
     AnalysisJobService,
@@ -154,6 +164,12 @@ import { CampaignTaskService } from "./campaign-tasks/campaign-task.service.js";
     TasksCashHmacGuard,
     TasksCashReplayService,
     CampaignTaskService,
+    CampaignTaskRecurringQueueService,
+    CampaignTaskRecurringService,
+    CampaignTaskRecurringWorker,
+    NotificationQueueService,
+    NotificationService,
+    NotificationWorker,
   ],
   exports: [
     AiService,

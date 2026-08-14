@@ -27,6 +27,7 @@ const baseEnv = {
   AI_SERVICE_REPLAY_WINDOW_SECONDS: "120",
   AI_SERVICE_VERSION: "0.1.0",
   ADMIN_API_TOKEN: "test-only-admin-token-with-32-characters!!",
+    CAMPAIGN_TASK_PARTICIPANT_API_TOKEN: "test-only-participant-token-with-32-chars",
 } as const;
 
 function matchesFilter(doc: Record<string, unknown>, filter: Record<string, unknown>): boolean {
