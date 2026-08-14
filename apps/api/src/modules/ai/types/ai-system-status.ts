@@ -100,6 +100,8 @@ export interface AiSystemStatus {
     workerConcurrency: number;
     awaitingProofAssignments: number;
     pendingReviews: number;
+    proofProcessingEnabled: boolean;
+    emergencyProofStop: boolean;
     autoVerificationEnabled: boolean;
     publicPostInspectionEnabled: boolean;
     tasksCashIntegrationEnabled: boolean;
@@ -107,6 +109,23 @@ export interface AiSystemStatus {
     qrDecoder: string;
     outboxPending: number;
     outboxFailed: number;
+    participantPortalEnabled: boolean;
+    participantAuthConfigured: boolean;
+    browserProofUploadEnabled: boolean;
+    browserCorsConfigured: boolean;
+    minioPrivateStorageConfigured: boolean;
+    recurringEnabled: boolean;
+    recurringSchedulerEnabled: boolean;
+    recurringQueues: Record<string, QueueCountSnapshot>;
+    recurringWorkerHeartbeat: "ok" | "unknown";
+    recurringDLQCount: number;
+    notificationsInAppEnabled: boolean;
+    notificationQueues: Record<string, QueueCountSnapshot>;
+    notificationEmailEnabled: boolean;
+    notificationWebhookEnabled: boolean;
+    notificationWorkerHeartbeat: "ok" | "unknown";
+    notificationDLQCount: number;
+    rewardCapabilityPresent: false;
   };
   logging: {
     subsystemState: "ready" | "degraded" | "unavailable";

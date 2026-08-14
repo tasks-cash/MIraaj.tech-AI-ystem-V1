@@ -20,6 +20,8 @@ import { CampaignQueueService } from "./queue/campaign-queue.service.js";
 import { CampaignSeedService } from "./campaigns/campaign-seed.service.js";
 import { CreativeQueueService } from "./queue/creative-queue.service.js";
 import { DistributionQueueService } from "./queue/distribution-queue.service.js";
+import { CampaignTaskRecurringQueueService } from "./queue/campaign-task-recurring-queue.service.js";
+import { NotificationQueueService } from "./queue/notification-queue.service.js";
 import { CreativeSeedService } from "./creative/creative-seed.service.js";
 import { AuditEventService } from "./audit/audit-event.service.js";
 import { CampaignJobModel, CampaignPackageModel } from "./models/campaign.schema.js";
@@ -75,6 +77,8 @@ export class AiHealthService {
     @Optional()
     @Inject(DistributionQueueService)
     private readonly distributionQueue?: DistributionQueueService,
+    @Optional() @Inject(CampaignTaskRecurringQueueService) private readonly recurringQueue?: CampaignTaskRecurringQueueService,
+    @Optional() @Inject(NotificationQueueService) private readonly notificationQueue?: NotificationQueueService,
   ) {}
 
   async getSystemStatus(input?: {
@@ -295,19 +299,23 @@ export class AiHealthService {
       awaitingReviewAssets: awaitingReviewCreativeAssets,
       quarantinedAssets: quarantinedCreativeAssets,
     };
-    const [distributionQueues, awaitingProofAssignments, pendingReviews, outboxPending, outboxFailed, distributionStatus] = await Promise.all([
+    const [distributionQueues, awaitingProofAssignments, pendingReviews, outboxPending, outboxFailed, distributionStatus, recurringStats, notificationStats] = await Promise.all([
       this.distributionQueue?.getQueueStats() ?? Promise.resolve({}),
       withTimeout(DistributionAssignmentModel.countDocuments({ status: { $in: ["active", "awaiting_proof"] } }).catch(() => 0), 1_000, 0),
       withTimeout(ProofSubmissionModel.countDocuments({ status: "needs_review" }).catch(() => 0), 1_000, 0),
       withTimeout(IntegrationOutboxEventModel.countDocuments({ status: { $in: ["pending", "retry_scheduled"] } }).catch(() => 0), 1_000, 0),
       withTimeout(IntegrationOutboxEventModel.countDocuments({ status: "dead_letter" }).catch(() => 0), 1_000, 0),
       this.client.getDistributionStatus?.({ requestId, correlationId }).catch(() => ({})) ?? Promise.resolve({}),
+      this.recurringQueue?.stats().catch(() => ({})) ?? Promise.resolve({}),
+      this.notificationQueue?.stats().catch(() => ({})) ?? Promise.resolve({}),
     ]);
     const distributionBlock: AiSystemStatus["distribution"] = {
       queues: distributionQueues,
       workerConcurrency: environment.AI_PROOF_WORKER_CONCURRENCY,
       awaitingProofAssignments,
       pendingReviews,
+      proofProcessingEnabled: environment.DISTRIBUTION_PROOF_PROCESSING_ENABLED,
+      emergencyProofStop: environment.DISTRIBUTION_EMERGENCY_PROOF_STOP,
       autoVerificationEnabled: environment.DISTRIBUTION_AUTO_VERIFY_ENABLED,
       publicPostInspectionEnabled: environment.DISTRIBUTION_PUBLIC_POST_INSPECTION_ENABLED,
       tasksCashIntegrationEnabled: environment.TASKS_CASH_INTEGRATION_ENABLED,
@@ -315,6 +323,23 @@ export class AiHealthService {
       qrDecoder: typeof Object.entries(distributionStatus).find(([key]) => key === "qrDecoder")?.[1] === "string" ? Object.entries(distributionStatus).find(([key]) => key === "qrDecoder")?.[1] as string : "unavailable",
       outboxPending,
       outboxFailed,
+      participantPortalEnabled: environment.CAMPAIGN_TASK_PARTICIPANT_PORTAL_ENABLED,
+      participantAuthConfigured: environment.CAMPAIGN_TASK_PARTICIPANT_API_TOKEN.length >= 32,
+      browserProofUploadEnabled: environment.CAMPAIGN_TASK_BROWSER_PROOF_UPLOAD_ENABLED,
+      browserCorsConfigured: environment.MIRAAJ_WEB_ORIGINS.length > 0 && environment.MIRAAJ_WEB_ORIGINS !== "*",
+      minioPrivateStorageConfigured: Boolean(environment.S3_BUCKET),
+      recurringEnabled: environment.CAMPAIGN_TASK_RECURRING_ENABLED,
+      recurringSchedulerEnabled: environment.CAMPAIGN_TASK_RECURRING_SCHEDULER_ENABLED,
+      recurringQueues: recurringStats as Record<string, AiSystemStatus["distribution"]["queues"][string]>,
+      recurringWorkerHeartbeat: environment.CAMPAIGN_TASK_RECURRING_SCHEDULER_ENABLED ? "ok" : "unknown",
+      recurringDLQCount: Number((recurringStats as Record<string, { waiting?: number }> | undefined)?.deadLetter?.waiting ?? 0),
+      notificationsInAppEnabled: environment.NOTIFICATION_IN_APP_ENABLED,
+      notificationQueues: notificationStats as Record<string, AiSystemStatus["distribution"]["queues"][string]>,
+      notificationEmailEnabled: environment.NOTIFICATION_EMAIL_ENABLED,
+      notificationWebhookEnabled: environment.NOTIFICATION_EXTERNAL_WEBHOOK_ENABLED,
+      notificationWorkerHeartbeat: environment.NOTIFICATION_IN_APP_ENABLED ? "ok" : "unknown",
+      notificationDLQCount: Number((notificationStats as Record<string, { waiting?: number }> | undefined)?.deadLetter?.waiting ?? 0),
+      rewardCapabilityPresent: false,
     };
     const loggingBlock: AiSystemStatus["logging"] = {
       subsystemState: "ready",
