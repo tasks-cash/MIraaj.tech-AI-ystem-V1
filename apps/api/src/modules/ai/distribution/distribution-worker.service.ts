@@ -129,9 +129,11 @@ export class DistributionWorkerService implements OnModuleInit, OnModuleDestroy 
     if (!event) return;
     const body = JSON.stringify(event.payload);
     const timestamp = Date.now().toString();
-    const signature = signProofCallback(this.environment.TASKS_CASH_HMAC_SECRET, Number(timestamp), body);
+    const hmacSecret = this.environment.TASKS_CASH_DISTRIBUTION_HMAC_SECRET || this.environment.TASKS_CASH_HMAC_SECRET;
+    const callbackUrl = this.environment.TASKS_CASH_DISTRIBUTION_CALLBACK_URL || this.environment.TASKS_CASH_CALLBACK_URL;
+    const signature = signProofCallback(hmacSecret, Number(timestamp), body);
     try {
-      const response = await fetch(this.environment.TASKS_CASH_CALLBACK_URL, { method: "POST", headers: { "content-type": "application/json", "x-miraaj-event-id": event.eventId, "x-miraaj-timestamp": timestamp, "x-miraaj-signature": signature }, body, signal: AbortSignal.timeout(10_000) });
+      const response = await fetch(callbackUrl, { method: "POST", headers: { "content-type": "application/json", "x-miraaj-event-id": event.eventId, "x-miraaj-timestamp": timestamp, "x-miraaj-signature": signature }, body, signal: AbortSignal.timeout(10_000) });
       if (!response.ok) throw new Error(`CALLBACK_HTTP_${response.status}`);
       await IntegrationOutboxEventModel.updateOne({ eventId: event.eventId }, { $set: { status: "delivered", deliveredAt: new Date() }, $unset: { safeError: 1, nextAttemptAt: 1 } });
     } catch (error) {

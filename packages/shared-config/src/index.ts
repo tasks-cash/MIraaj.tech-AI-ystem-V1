@@ -148,6 +148,26 @@ export const ALL_TEMPORARY_ADMIN_PERMISSIONS = Object.values(AI_PERMISSIONS);
 const positiveInt = (min: number, max: number) =>
   z.coerce.number().int().min(min).max(max);
 
+function validateTasksCashCallbackUrl(url: string, appEnv: string, varName: string): string | undefined {
+  if (!url) return `enabled Tasks.cash integration requires a callback URL (${varName})`;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return `${varName} must be a valid URL`;
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    return `${varName} must use HTTP or HTTPS`;
+  }
+  if (appEnv === "production" && parsed.protocol !== "https:") {
+    return `${varName} must use HTTPS in production`;
+  }
+  if (parsed.username || parsed.password) {
+    return `${varName} must not contain embedded credentials`;
+  }
+  return undefined;
+}
+
 export const serverEnvironmentSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   APP_ENV: appEnvironmentSchema.default("development"),
@@ -432,8 +452,12 @@ export const apiEnvironmentSchema = serverEnvironmentSchema
     DISTRIBUTION_EMERGENCY_OUTBOX_STOP: environmentBoolean.default(false),
     TASKS_CASH_INTEGRATION_ENABLED: environmentBoolean.default(false),
     TASKS_CASH_OUTBOX_QUEUE_NAME: z.string().min(1).default("miraaj.integrations.tasks-cash.outbox"),
+    // Deprecated: prefer TASKS_CASH_DISTRIBUTION_CALLBACK_URL for the Tasks.cash Distribution integration.
     TASKS_CASH_CALLBACK_URL: optionalHttpUrl.default(""),
     TASKS_CASH_HMAC_SECRET: z.string().default(""),
+    // Dedicated, Tasks.cash Distribution-only configuration.
+    TASKS_CASH_DISTRIBUTION_CALLBACK_URL: optionalHttpUrl.default(""),
+    TASKS_CASH_DISTRIBUTION_HMAC_SECRET: z.string().default(""),
     TASKS_CASH_CALLBACK_MAX_RETRIES: positiveInt(1, 25).default(10),
   })
   .superRefine((environment, context) => {
@@ -501,15 +525,28 @@ export const apiEnvironmentSchema = serverEnvironmentSchema
         message: "DISTRIBUTION_AUTO_VERIFY_ENABLED must remain false by default",
       });
     }
-    if (
-      environment.TASKS_CASH_INTEGRATION_ENABLED &&
-      (!environment.TASKS_CASH_CALLBACK_URL || environment.TASKS_CASH_HMAC_SECRET.length < 32)
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["TASKS_CASH_INTEGRATION_ENABLED"],
-        message: "enabled Tasks.cash integration requires a callback URL and 32-character HMAC secret",
-      });
+    if (environment.TASKS_CASH_INTEGRATION_ENABLED) {
+      const hmacSecret = environment.TASKS_CASH_DISTRIBUTION_HMAC_SECRET || environment.TASKS_CASH_HMAC_SECRET;
+      if (hmacSecret.length < 32) {
+        context.addIssue({
+          code: "custom",
+          path: ["TASKS_CASH_DISTRIBUTION_HMAC_SECRET"],
+          message: "enabled Tasks.cash Distribution integration requires a 32-character HMAC secret",
+        });
+      }
+      const callbackUrl = environment.TASKS_CASH_DISTRIBUTION_CALLBACK_URL || environment.TASKS_CASH_CALLBACK_URL;
+      const callbackError = validateTasksCashCallbackUrl(
+        callbackUrl,
+        environment.APP_ENV,
+        "TASKS_CASH_DISTRIBUTION_CALLBACK_URL",
+      );
+      if (callbackError) {
+        context.addIssue({
+          code: "custom",
+          path: ["TASKS_CASH_DISTRIBUTION_CALLBACK_URL"],
+          message: callbackError,
+        });
+      }
     }
     if (environment.CAMPAIGN_TASK_RECURRING_SCHEDULER_ENABLED && !environment.CAMPAIGN_TASK_RECURRING_ENABLED) {
       context.addIssue({ code: "custom", path: ["CAMPAIGN_TASK_RECURRING_SCHEDULER_ENABLED"], message: "recurring scheduler requires recurring tasks to be enabled" });

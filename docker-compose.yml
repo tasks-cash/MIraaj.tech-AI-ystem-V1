@@ -29,6 +29,8 @@ services:
       dockerfile: apps/api/Dockerfile
       target: development
     command: sh -c "pnpm install --frozen-lockfile && pnpm dev:api"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       APP_ENV: ${APP_ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -196,6 +198,8 @@ services:
       TASKS_CASH_OUTBOX_QUEUE_NAME: ${TASKS_CASH_OUTBOX_QUEUE_NAME:-miraaj.integrations.tasks-cash.outbox}
       TASKS_CASH_CALLBACK_URL: ${TASKS_CASH_CALLBACK_URL:-}
       TASKS_CASH_HMAC_SECRET: ${TASKS_CASH_HMAC_SECRET:-}
+      TASKS_CASH_DISTRIBUTION_CALLBACK_URL: ${TASKS_CASH_DISTRIBUTION_CALLBACK_URL:-}
+      TASKS_CASH_DISTRIBUTION_HMAC_SECRET: ${TASKS_CASH_DISTRIBUTION_HMAC_SECRET:-}
       TASKS_CASH_CALLBACK_MAX_RETRIES: ${TASKS_CASH_CALLBACK_MAX_RETRIES:-10}
     ports:
       - "4200:4200"
@@ -409,6 +413,7 @@ services:
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-miraaj-local}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-local-development-storage-secret}
       S3_BUCKET: ${S3_BUCKET:-miraaj-media}
+
 
 volumes:
   web_node_modules:

@@ -21,7 +21,8 @@ export class TasksCashHmacGuard implements CanActivate {
     const nonce = request.headers["x-tasks-cash-nonce"] ?? "";
     const signature = request.headers["x-tasks-cash-signature"] ?? "";
     if (!Number.isFinite(timestamp) || Math.abs(Date.now() - timestamp) > TASKS_CASH_CLOCK_SKEW_MS || !nonce) throw new UnauthorizedException("TASKS_CASH_AUTHENTICATION_FAILED");
-    const expected = signTasksCashRequest(environment.TASKS_CASH_HMAC_SECRET, {
+    const hmacSecret = environment.TASKS_CASH_DISTRIBUTION_HMAC_SECRET || environment.TASKS_CASH_HMAC_SECRET;
+    const expected = signTasksCashRequest(hmacSecret, {
       method: request.method,
       path: request.originalUrl.split("?")[0] ?? request.originalUrl,
       timestamp,

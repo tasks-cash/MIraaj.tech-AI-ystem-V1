@@ -19,6 +19,21 @@ export class HealthController {
     private readonly aiService: AiInternalClientService,
   ) {}
 
+  private tasksCashReadiness(environment: ReturnType<typeof loadEnvironment>) {
+    const enabled = environment.TASKS_CASH_INTEGRATION_ENABLED;
+    const hmacSecret = environment.TASKS_CASH_DISTRIBUTION_HMAC_SECRET || environment.TASKS_CASH_HMAC_SECRET;
+    const callbackUrl = environment.TASKS_CASH_DISTRIBUTION_CALLBACK_URL || environment.TASKS_CASH_CALLBACK_URL;
+    const hmacConfigured = enabled && hmacSecret.length >= 32;
+    const callbackUrlConfigured = enabled && Boolean(callbackUrl);
+    return {
+      enabled,
+      hmacConfigured,
+      callbackUrlConfigured,
+      callbackDeliveryReady: enabled && hmacConfigured && callbackUrlConfigured,
+      outboxQueueName: environment.TASKS_CASH_OUTBOX_QUEUE_NAME,
+    };
+  }
+
   @Get("health")
   health() {
     const environment = loadEnvironment();
@@ -27,6 +42,18 @@ export class HealthController {
       service: "miraaj-api",
       version: API_VERSION,
       environment: environment.APP_ENV,
+      integrations: {
+        tasksCash: this.tasksCashReadiness(environment),
+      },
+    };
+  }
+
+  @Get("health/integrations")
+  integrations() {
+    const environment = loadEnvironment();
+    return {
+      status: "ok",
+      tasksCash: this.tasksCashReadiness(environment),
     };
   }
 
@@ -43,6 +70,7 @@ export class HealthController {
     const isReady =
       dependencies.mongo === "ready" &&
       dependencies.redis === "ready" &&
+      dependencies.minio === "ready" &&
       aiStatus === "ready";
     if (!isReady) {
       throw new ServiceUnavailableException({

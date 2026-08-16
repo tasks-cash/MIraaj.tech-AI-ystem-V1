@@ -41,6 +41,7 @@ describe("Tasks.cash distribution HMAC guard", () => {
       AI_SERVICE_URL: "http://localhost:8200", AI_SERVICE_INTERNAL_SECRET: "test-internal-secret-with-at-least-32-characters",
       ADMIN_API_TOKEN: "test-admin-token-with-at-least-32-characters", TASKS_CASH_INTEGRATION_ENABLED: "true",
       TASKS_CASH_CALLBACK_URL: "https://tasks.example/callback", TASKS_CASH_HMAC_SECRET: secret,
+      TASKS_CASH_DISTRIBUTION_CALLBACK_URL: "https://tasks.example/callback", TASKS_CASH_DISTRIBUTION_HMAC_SECRET: secret,
     });
     resetEnvironmentCache();
   });

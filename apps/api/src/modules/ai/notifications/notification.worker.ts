@@ -16,7 +16,8 @@ export class NotificationWorker implements OnModuleInit, OnModuleDestroy {
     this.worker = new Worker(this.environment.NOTIFICATION_QUEUE_NAME, (job) => this.service.deliver(String(job.data.publicId)), { connection: { url: this.environment.REDIS_URL }, concurrency: 4 });
     this.worker.on("failed", (job, error) => { if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) void this.queues.deadLetterItem(String(job.data.publicId), error.message); });
     this.expiryTimer = setInterval(() => {
-      void this.service.expireNotifications().then((result) => this.service.cleanupRetention().then((cleanup) => ({ ...result, ...cleanup })));
+      if (!this.service) return;
+      void this.service.expireNotifications().then((result) => this.service?.cleanupRetention().then((cleanup) => ({ ...result, ...cleanup })));
     }, 60_000);
     this.expiryTimer.unref();
   }
