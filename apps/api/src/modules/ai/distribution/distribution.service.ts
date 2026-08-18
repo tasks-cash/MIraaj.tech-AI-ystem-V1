@@ -64,6 +64,21 @@ export class DistributionService {
     if (supplied) throw new BadRequestException("PROOF_OCCURRENCE_NOT_APPLICABLE");
   }
 
+  private proofUploadSessionResponse(proofSubmissionId: string, evidence: Array<{ evidenceId: string; kind: string; contentType: string; uploadUrl: string; uploadExpiresAt: string }>, expiresAt?: string) {
+    return {
+      apiVersion: TASKS_CASH_DISTRIBUTION_API_VERSION,
+      proofSubmissionId,
+      evidence: evidence.map((item) => ({
+        evidenceId: item.evidenceId,
+        kind: item.kind,
+        contentType: item.contentType,
+        uploadUrl: item.uploadUrl,
+        uploadExpiresAt: item.uploadExpiresAt,
+      })),
+      expiresAt: evidence[0]?.uploadExpiresAt ?? expiresAt,
+    };
+  }
+
   async createTemplate(input: Record<string, unknown>, actor: string, correlationId = randomUUID()) {
     const campaignPackageId = String(input.campaignPackageId ?? "");
     const campaign = await CampaignPackageModel.findOne({ campaignPackageId }).lean();
@@ -291,7 +306,23 @@ export class DistributionService {
 
   listAssignments() { return DistributionAssignmentModel.find({}).select("-assignmentTokenHash").sort({ createdAt: -1 }).lean(); }
   async cancelAssignment(id: string, externalUserId?: string) {
-    const assignment = await DistributionAssignmentModel.findOneAndUpdate({ $or: [{ assignmentId: id }, { externalAssignmentId: id }], ...(externalUserId ? { externalUserId } : {}), status: { $nin: ["verified", "rejected", "cancelled", "expired"] } }, { $set: { status: "cancelled", cancelledAt: new Date(), rewardEligibilityRecommendation: "not_eligible" } }, { new: true }).orFail(() => new ConflictException("DISTRIBUTION_ASSIGNMENT_CANCEL_INVALID"));
+    const query = { $or: [{ assignmentId: id }, { externalAssignmentId: id }], ...(externalUserId ? { externalUserId } : {}) };
+    const assignment = await DistributionAssignmentModel.findOneAndUpdate({ ...query, status: { $nin: ["verified", "rejected", "cancelled", "expired"] } }, { $set: { status: "cancelled", cancelledAt: new Date(), rewardEligibilityRecommendation: "not_eligible" } }, { new: true });
+    if (!assignment) {
+      const existing = await DistributionAssignmentModel.findOne({ ...query, status: "cancelled" }).lean();
+      if (existing) {
+        if (externalUserId) {
+          return {
+            apiVersion: TASKS_CASH_DISTRIBUTION_API_VERSION,
+            externalAssignmentId: existing.externalAssignmentId,
+            status: "cancelled",
+            rewardEligibilityRecommendation: existing.rewardEligibilityRecommendation,
+          };
+        }
+        return publicDocument(existing);
+      }
+      throw new ConflictException("DISTRIBUTION_ASSIGNMENT_CANCEL_INVALID");
+    }
     await TrackedLinkModel.updateOne({ trackedLinkId: assignment.trackedLinkId }, { $set: { status: "revoked", revokedAt: new Date() } });
     if (externalUserId) return {
       apiVersion: TASKS_CASH_DISTRIBUTION_API_VERSION,
@@ -331,7 +362,9 @@ export class DistributionService {
     if (screenshotCount < 1 || screenshotCount > this.environment.DISTRIBUTION_MAX_SCREENSHOTS) throw new BadRequestException("PROOF_SCREENSHOT_COUNT_INVALID");
     const hash = digest(idempotencyKey);
     const existing = await ProofSubmissionModel.findOne({ idempotencyKeyHash: hash }).lean();
-    if (existing) return existing;
+    if (existing) {
+      return this.proofUploadSessionResponse(existing.proofSubmissionId, existing.evidence as Array<{ evidenceId: string; kind: string; contentType: string; uploadUrl: string; uploadExpiresAt: string }>);
+    }
     const proofSubmissionId = `dps_${randomUUID()}`;
     const files = Array.isArray(input.files) ? input.files as Array<Record<string, unknown>> : [];
     if (files.length && files.length !== screenshotCount) throw new BadRequestException("PROOF_FILE_METADATA_INVALID");
@@ -347,18 +380,7 @@ export class DistributionService {
     }));
     const retentionExpiresAt = new Date(Date.now() + this.environment.DISTRIBUTION_PROOF_RETENTION_DAYS * 86_400_000);
     await ProofSubmissionModel.create({ proofSubmissionId, tenantId: assignment.tenantId, assignmentId: assignment.assignmentId, externalAssignmentId: assignment.externalAssignmentId, occurrenceId: assignment.occurrenceId, externalUserId: assignment.externalUserId, evidence, evidenceAttempts: [{ revision: 1, evidence: evidence.map((item) => ({ evidenceId: item.evidenceId, kind: item.kind, objectKey: item.objectKey, contentType: item.contentType, contentLength: item.contentLength, originalFileName: item.originalFileName, uploadExpiresAt: item.uploadExpiresAt })), createdAt: new Date(), actor }], postUrl: input.postUrl, claimedPublicationAt: input.claimedPublicationAt, claimedGroupName: input.claimedGroupName, userNote: input.userNote, idempotencyKeyHash: hash, retentionExpiresAt, createdBy: actor, correlationId: String(input.correlationId ?? randomUUID()) });
-    return {
-      apiVersion: TASKS_CASH_DISTRIBUTION_API_VERSION,
-      proofSubmissionId,
-      evidence: evidence.map((item) => ({
-        evidenceId: item.evidenceId,
-        kind: item.kind,
-        contentType: item.contentType,
-        uploadUrl: item.uploadUrl,
-        uploadExpiresAt: item.uploadExpiresAt,
-      })),
-      expiresAt: evidence[0]?.uploadExpiresAt,
-    };
+    return this.proofUploadSessionResponse(proofSubmissionId, evidence);
   }
 
   async addEvidence(proofSubmissionId: string, input: Record<string, unknown>, actor: string) {
@@ -393,8 +415,19 @@ export class DistributionService {
   }
 
   async completeProof(proofSubmissionId: string, externalUserId: string, tenantId?: string) {
-    const proof = await ProofSubmissionModel.findOne({ proofSubmissionId, externalUserId, ...(tenantId ? { tenantId } : {}), status: "upload_pending" });
+    const proof = await ProofSubmissionModel.findOne({ proofSubmissionId, externalUserId, ...(tenantId ? { tenantId } : {}) });
     if (!proof) throw new BadRequestException("PROOF_SUBMISSION_INVALID");
+    if (proof.status !== "upload_pending") {
+      const resumable = ["submitted", "queued", "verifying", "needs_review", "verified", "rejected"].includes(proof.status);
+      if (!resumable) throw new BadRequestException("PROOF_SUBMISSION_INVALID");
+      return {
+        apiVersion: TASKS_CASH_DISTRIBUTION_API_VERSION,
+        proofSubmissionId: proof.proofSubmissionId,
+        externalAssignmentId: proof.externalAssignmentId,
+        status: proof.status === "submitted" ? "queued" : proof.status,
+        submittedAt: proof.submittedAt,
+      };
+    }
     const assignment = await DistributionAssignmentModel.findOne({ assignmentId: proof.assignmentId }).lean();
     if (assignment) {
       if (proof.occurrenceId !== assignment.occurrenceId) throw new ConflictException("PROOF_OCCURRENCE_MISMATCH");

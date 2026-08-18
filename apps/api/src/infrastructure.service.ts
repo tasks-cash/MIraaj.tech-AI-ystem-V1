@@ -1,12 +1,15 @@
 import { Injectable, type OnApplicationShutdown, type OnModuleInit } from "@nestjs/common";
+import { HeadBucketCommand } from "@aws-sdk/client-s3";
 import { Redis } from "ioredis";
 import mongoose from "mongoose";
 import { createLogger } from "@miraaj/shared-logging";
 import { loadEnvironment } from "./environment.js";
+import { createS3Client } from "./s3-client.js";
 
 export interface DependencyStatus {
   mongo: "ready" | "unavailable";
   redis: "ready" | "unavailable";
+  minio: "ready" | "unavailable";
 }
 
 @Injectable()
@@ -51,7 +54,15 @@ export class InfrastructureService
     } catch {
       redis = "unavailable";
     }
-    return { mongo, redis };
+    let minio: DependencyStatus["minio"] = "unavailable";
+    try {
+      const s3 = createS3Client({ purpose: "internal" });
+      await s3.send(new HeadBucketCommand({ Bucket: this.environment.S3_BUCKET }));
+      minio = "ready";
+    } catch {
+      minio = "unavailable";
+    }
+    return { mongo, redis, minio };
   }
 
   async onApplicationShutdown(): Promise<void> {
