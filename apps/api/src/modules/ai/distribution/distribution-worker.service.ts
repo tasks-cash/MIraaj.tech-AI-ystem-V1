@@ -16,7 +16,7 @@ import {
 import { MediaStorageService } from "../media/media-storage.service.js";
 import { DistributionQueueService } from "../queue/distribution-queue.service.js";
 import { DistributionService } from "./distribution.service.js";
-import { signProofCallback } from "./distribution.contracts.js";
+import { PROOF_VERIFICATION_REVIEW_REQUIRED_EVENT_TYPE, signProofCallback } from "./distribution.contracts.js";
 
 @Injectable()
 export class DistributionWorkerService implements OnModuleInit, OnModuleDestroy {
@@ -120,7 +120,11 @@ export class DistributionWorkerService implements OnModuleInit, OnModuleDestroy 
       ProofSubmissionModel.updateOne({ proofSubmissionId: proof.proofSubmissionId }, { $set: { status } }),
       DistributionAssignmentModel.updateOne({ assignmentId: assignment.assignmentId }, { $set: { status, latestVerificationDecision: decision, rewardEligibilityRecommendation: reward } }),
     ]);
-    if (decision !== "needs_review") await this.service.createOutboxEvent(proof.toObject(), decision, reward, attempt.toObject());
+    if (decision === "needs_review") {
+      await this.service.createOutboxEvent(proof.toObject(), decision, reward, attempt.toObject(), PROOF_VERIFICATION_REVIEW_REQUIRED_EVENT_TYPE);
+    } else {
+      await this.service.createOutboxEvent(proof.toObject(), decision, reward, attempt.toObject());
+    }
   }
 
   private async deliverOutbox(job: Job<{ eventId: string }>) {

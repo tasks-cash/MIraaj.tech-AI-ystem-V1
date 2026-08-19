@@ -3,6 +3,7 @@ import { z } from "zod";
 
 export const TASKS_CASH_DISTRIBUTION_API_VERSION = "v1" as const;
 export const PROOF_VERIFICATION_EVENT_TYPE = "proof.verification.completed" as const;
+export const PROOF_VERIFICATION_REVIEW_REQUIRED_EVENT_TYPE = "proof.verification.review_required" as const;
 export const PROOF_VERIFICATION_EVENT_VERSION = 1 as const;
 export const TASKS_CASH_CLOCK_SKEW_MS = 120_000;
 export const TASKS_CASH_DISTRIBUTION_ENDPOINTS = Object.freeze({
@@ -141,6 +142,25 @@ export const proofVerificationCompletedEventSchema = z.object({
 }).strict();
 
 export type ProofVerificationCompletedEvent = z.infer<typeof proofVerificationCompletedEventSchema>;
+
+export const proofVerificationReviewRequiredEventSchema = z.object({
+  eventId: externalId,
+  eventVersion: z.literal(PROOF_VERIFICATION_EVENT_VERSION),
+  eventType: z.literal(PROOF_VERIFICATION_REVIEW_REQUIRED_EVENT_TYPE),
+  occurredAt: z.iso.datetime(),
+  externalTaskId: externalId,
+  externalUserId: externalId,
+  externalAssignmentId: externalId,
+  proofSubmissionId: externalId,
+  verificationDecision: z.literal("needs_review"),
+  verificationConfidence: z.number().min(0).max(1),
+  rewardEligibilityRecommendation: z.literal("pending_review"),
+  reasonCodes: z.array(z.string().min(1).max(200)).max(100),
+  resultChecksum: sha256,
+  correlationId: externalId,
+}).strict();
+
+export type ProofVerificationReviewRequiredEvent = z.infer<typeof proofVerificationReviewRequiredEventSchema>;
 
 function canonicalValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalValue);

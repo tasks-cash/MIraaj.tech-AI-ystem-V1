@@ -28,10 +28,12 @@ import { MediaStorageService } from "../media/media-storage.service.js";
 import { DistributionQueueService } from "../queue/distribution-queue.service.js";
 import {
   PROOF_VERIFICATION_EVENT_TYPE,
+  PROOF_VERIFICATION_REVIEW_REQUIRED_EVENT_TYPE,
   PROOF_VERIFICATION_EVENT_VERSION,
   TASKS_CASH_DISTRIBUTION_API_VERSION,
   proofResultChecksum,
   proofVerificationCompletedEventSchema,
+  proofVerificationReviewRequiredEventSchema,
 } from "./distribution.contracts.js";
 import { assertTemplateTransition, retentionDays } from "./distribution-operations.js";
 
@@ -355,7 +357,7 @@ export class DistributionService {
       throw new ConflictException("DISTRIBUTION_PROOF_PROCESSING_DISABLED");
     }
     if (!this.environment.CAMPAIGN_TASK_BROWSER_PROOF_UPLOAD_ENABLED) throw new ConflictException("CAMPAIGN_TASK_BROWSER_PROOF_UPLOAD_DISABLED");
-    const assignment = await DistributionAssignmentModel.findOne({ externalAssignmentId: String(input.externalAssignmentId), tenantId: String(input.tenantId), externalUserId: String(input.externalUserId), status: { $in: ["active", "awaiting_proof"] }, proofDeadlineAt: { $gt: new Date() } }).lean();
+    const assignmentQuery: Record<string, unknown> = { externalAssignmentId: String(input.externalAssignmentId), externalUserId: String(input.externalUserId), status: { $in: ["active", "awaiting_proof"] }, proofDeadlineAt: { $gt: new Date() } }; if (input.tenantId !== undefined && input.tenantId !== null && String(input.tenantId) !== "undefined") assignmentQuery.tenantId = String(input.tenantId); const assignment = await DistributionAssignmentModel.findOne(assignmentQuery).lean();
     if (!assignment) throw new BadRequestException("PROOF_ASSIGNMENT_INVALID_OR_EXPIRED");
     this.assertOccurrenceBinding(assignment, input.occurrenceId as string | undefined);
     const screenshotCount = Number(input.screenshotCount ?? 1);
@@ -527,7 +529,8 @@ export class DistributionService {
       DistributionAssignmentModel.updateOne({ assignmentId: proof.assignmentId }, { $set: { status: finalStatus, latestVerificationDecision: decision, rewardEligibilityRecommendation: reward } }),
     ]);
     const eventDecision = decision === "verified" ? "verified" : decision === "request_more_evidence" ? "needs_review" : "rejected";
-    await this.createOutboxEvent(proof, eventDecision, reward, attempt);
+    const eventType = eventDecision === "needs_review" ? PROOF_VERIFICATION_REVIEW_REQUIRED_EVENT_TYPE : PROOF_VERIFICATION_EVENT_TYPE;
+    await this.createOutboxEvent(proof, eventDecision, reward, attempt, eventType);
     return review;
   }
 
@@ -592,7 +595,7 @@ export class DistributionService {
     return { actor, proofsMinimized: expired.length, objectsDeleted };
   }
 
-  async createOutboxEvent(proof: Record<string, any>, decision: string, reward: string, attempt: Record<string, any>) {
+  async createOutboxEvent(proof: Record<string, any>, decision: string, reward: string, attempt: Record<string, any>, eventType: typeof PROOF_VERIFICATION_EVENT_TYPE | typeof PROOF_VERIFICATION_REVIEW_REQUIRED_EVENT_TYPE = PROOF_VERIFICATION_EVENT_TYPE) {
     const assignment = await DistributionAssignmentModel.findOne({ assignmentId: proof.assignmentId }).lean();
     if (!assignment) return;
     const eventId = `evt_${randomUUID()}`;
@@ -603,8 +606,26 @@ export class DistributionService {
       reasons: reasonCodes,
       scores: { overallVerificationScore: verificationConfidence },
     });
-    const payload = proofVerificationCompletedEventSchema.parse({ eventId, eventVersion: PROOF_VERIFICATION_EVENT_VERSION, eventType: PROOF_VERIFICATION_EVENT_TYPE, occurredAt: new Date().toISOString(), externalTaskId: assignment.externalTaskId, externalUserId: assignment.externalUserId, externalAssignmentId: assignment.externalAssignmentId, proofSubmissionId: proof.proofSubmissionId, verificationDecision: decision, verificationConfidence, rewardEligibilityRecommendation: reward, reasonCodes, resultChecksum, correlationId: proof.correlationId });
-    await IntegrationOutboxEventModel.create({ eventId, eventType: "proof.verification.completed", payload, payloadChecksum: digest(JSON.stringify(payload)), nextAttemptAt: new Date(), createdBy: "proof-verification", correlationId: proof.correlationId });
+    const basePayload = {
+      eventId,
+      eventVersion: PROOF_VERIFICATION_EVENT_VERSION,
+      eventType,
+      occurredAt: new Date().toISOString(),
+      externalTaskId: assignment.externalTaskId,
+      externalUserId: assignment.externalUserId,
+      externalAssignmentId: assignment.externalAssignmentId,
+      proofSubmissionId: proof.proofSubmissionId,
+      verificationDecision: decision,
+      verificationConfidence,
+      rewardEligibilityRecommendation: reward,
+      reasonCodes,
+      resultChecksum,
+      correlationId: proof.correlationId,
+    };
+    const payload = eventType === PROOF_VERIFICATION_REVIEW_REQUIRED_EVENT_TYPE
+      ? proofVerificationReviewRequiredEventSchema.parse(basePayload)
+      : proofVerificationCompletedEventSchema.parse(basePayload);
+    await IntegrationOutboxEventModel.create({ eventId, eventType, payload, payloadChecksum: digest(JSON.stringify(payload)), nextAttemptAt: new Date(), createdBy: "proof-verification", correlationId: proof.correlationId });
     if (this.environment.TASKS_CASH_INTEGRATION_ENABLED) await this.queues.enqueueOutbox(eventId);
   }
 }

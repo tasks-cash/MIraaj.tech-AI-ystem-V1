@@ -234,7 +234,7 @@ const proofReviewSchema = new Schema(
 const outboxEventSchema = new Schema(
   {
     eventId: { type: String, required: true, unique: true, index: true },
-    eventType: { type: String, enum: ["proof.verification.completed"], required: true },
+    eventType: { type: String, enum: ["proof.verification.completed", "proof.verification.review_required"], required: true },
     eventVersion: { type: Number, default: 1 },
     payload: { type: Schema.Types.Mixed, required: true },
     payloadChecksum: { type: String, required: true },
